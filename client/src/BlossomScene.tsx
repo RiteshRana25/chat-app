@@ -19,7 +19,7 @@ const COLORS = ["#ffb7c5", "#ffc9d4", "#ffa6b8", "#ffe0e8", "#ff9aaf", "#ffd6e0"
 
 function makePetal(
   w: number,
-  h: number,
+  _h: number,
   burst = false,
   origin?: { x: number; y: number }
 ): Petal {
