@@ -1,5 +1,17 @@
 # Deploy backend to Railway
 
+## If you deployed the full chat-app repo (not only server)
+
+That’s fine. In Railway:
+
+1. Open **chat-app** service → **Settings**
+2. Set **Root Directory** to: `server`
+3. Save
+4. Add Variables (`DATABASE_URL`, `JWT_SECRET`, `DEEPL_API_KEY`)
+5. Click **Redeploy**
+
+Or leave Root Directory empty — root `railway.toml` will install/start the server folder.
+
 ## Before you start
 1. Push this project to GitHub (do **not** commit `server/.env`).
 2. Have ready: Neon `DATABASE_URL`, `JWT_SECRET`, `DEEPL_API_KEY`.

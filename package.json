@@ -5,7 +5,12 @@
   "scripts": {
     "dev": "concurrently -n server,client -c teal,magenta \"npm run dev --prefix server\" \"npm run dev --prefix client\"",
     "dev:server": "npm run dev --prefix server",
-    "dev:client": "npm run dev --prefix client"
+    "dev:client": "npm run dev --prefix client",
+    "start": "npm start --prefix server",
+    "build": "npm install --prefix server"
+  },
+  "engines": {
+    "node": ">=20"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"
