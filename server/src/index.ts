@@ -403,9 +403,10 @@ io.on("connection", (socket) => {
 async function start() {
   try {
     await initDb();
-    server.listen(PORT, () => {
+    const host = process.env.HOST || "0.0.0.0";
+    server.listen(PORT, host, () => {
       console.log(
-        `Friends Forever Chat server listening on http://localhost:${PORT}`
+        `Friends Forever Chat server listening on http://${host}:${PORT}`
       );
     });
   } catch (err) {
