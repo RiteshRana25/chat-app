@@ -42,23 +42,63 @@ if (process.env.DEEPL_API_KEY) {
   );
 }
 
-const clientOrigins = (process.env.CLIENT_ORIGIN || "")
-  .split(",")
-  .map((s) => s.trim())
-  .filter(Boolean);
+function normalizeOrigin(origin: string): string {
+  return origin.trim().replace(/\/+$/, "");
+}
 
-const corsOrigin =
-  clientOrigins.length > 0
-    ? clientOrigins
-    : true;
+const defaultOrigins = [
+  "https://friendforeverchat.netlify.app",
+  "https://reliable-cascaron-ff2bcb.netlify.app",
+  "http://localhost:5173",
+  "http://localhost:5174",
+  "http://127.0.0.1:5173",
+  "http://127.0.0.1:5174",
+];
+
+const allowedOrigins = new Set(
+  [
+    ...defaultOrigins,
+    ...(process.env.CLIENT_ORIGIN || "").split(","),
+  ]
+    .map(normalizeOrigin)
+    .filter(Boolean)
+);
+
+console.log("CORS origins:", [...allowedOrigins].join(", "));
+
+const corsOptions: cors.CorsOptions = {
+  origin(origin, callback) {
+    // Non-browser clients / same-origin have no Origin header
+    if (!origin) {
+      callback(null, true);
+      return;
+    }
+    const normalized = normalizeOrigin(origin);
+    if (allowedOrigins.has(normalized)) {
+      callback(null, true);
+      return;
+    }
+    console.warn("Blocked CORS origin:", origin);
+    callback(new Error(`CORS blocked for origin: ${origin}`));
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  optionsSuccessStatus: 204,
+};
 
 const app = express();
-app.use(cors({ origin: corsOrigin, credentials: true }));
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
 app.use(express.json());
 
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { origin: corsOrigin, credentials: true },
+  cors: {
+    origin: [...allowedOrigins],
+    credentials: true,
+    methods: ["GET", "POST"],
+  },
 });
 
 type AuthPayload = { userId: string; email: string };
