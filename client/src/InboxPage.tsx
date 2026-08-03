@@ -57,7 +57,7 @@ export function InboxPage() {
       <div className="inbox-toolbar">
         <div className="user-chip">
           <span className="user-chip-dot" />
-          <p className="muted">{user?.email}</p>
+          <p className="muted">{user?.displayName}</p>
         </div>
         <button
           type="button"
@@ -120,8 +120,7 @@ export function InboxPage() {
                 {(c.otherUser?.displayName || "?")[0].toUpperCase()}
               </div>
               <div className="conversation-meta">
-                <strong>{c.otherUser?.displayName || c.otherUser?.email}</strong>
-                <span className="email-line">{c.otherUser?.email}</span>
+                <strong>{c.otherUser?.displayName || "…"}</strong>
                 <span className="preview">{c.lastMessage?.text || "—"}</span>
               </div>
               <span className="row-arrow" aria-hidden="true">

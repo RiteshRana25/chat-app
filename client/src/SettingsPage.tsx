@@ -4,7 +4,7 @@ import { useAuth, type Theme } from "./AuthContext";
 import type { Lang } from "./i18n";
 
 export function SettingsPage() {
-  const { t, lang, setLanguage, theme, setTheme, user } = useAuth();
+  const { t, lang, setLanguage, theme, setTheme } = useAuth();
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -39,7 +39,6 @@ export function SettingsPage() {
       <section className="settings-card">
         <h2>{t.languagePref}</h2>
         <p className="hint">{t.languageHelp}</p>
-        <p className="muted">{user?.email}</p>
 
         <div className="lang-toggle wide" role="group" aria-label={t.language}>
           <button
