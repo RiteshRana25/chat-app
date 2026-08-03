@@ -7,7 +7,7 @@ import { InboxPage } from "./InboxPage";
 import { SettingsPage } from "./SettingsPage";
 
 export default function App() {
-  const { user, loading, t } = useAuth();
+  const { user, loading, t, theme } = useAuth();
 
   if (loading) {
     return (
@@ -23,7 +23,10 @@ export default function App() {
 
   return (
     <div className="app-with-blossom">
-      <BlossomScene density={18} className="blossom-dim" />
+      <BlossomScene
+        density={theme === "dark" ? 42 : 18}
+        className="blossom-dim"
+      />
       <Routes>
         <Route path="/" element={<InboxPage />} />
         <Route path="/chat/:id" element={<ChatPage />} />

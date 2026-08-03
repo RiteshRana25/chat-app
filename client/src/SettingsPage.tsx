@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { useAuth } from "./AuthContext";
+import { useAuth, type Theme } from "./AuthContext";
 import type { Lang } from "./i18n";
 
 export function SettingsPage() {
-  const { t, lang, setLanguage, user } = useAuth();
+  const { t, lang, setLanguage, theme, setTheme, user } = useAuth();
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -18,6 +18,12 @@ export function SettingsPage() {
     } finally {
       setBusy(false);
     }
+  }
+
+  function pickTheme(next: Theme) {
+    if (next === theme) return;
+    setTheme(next);
+    setSaved(true);
   }
 
   return (
@@ -51,6 +57,32 @@ export function SettingsPage() {
             onClick={() => pick("zh")}
           >
             {t.chinese}
+          </button>
+        </div>
+      </section>
+
+      <section className="settings-card">
+        <h2>{t.appearance}</h2>
+        <p className="hint">{t.appearanceHelp}</p>
+
+        <div
+          className="lang-toggle wide theme-toggle"
+          role="group"
+          aria-label={t.appearance}
+        >
+          <button
+            type="button"
+            className={theme === "light" ? "active" : ""}
+            onClick={() => pickTheme("light")}
+          >
+            {t.lightMode}
+          </button>
+          <button
+            type="button"
+            className={theme === "dark" ? "active" : ""}
+            onClick={() => pickTheme("dark")}
+          >
+            {t.darkMode}
           </button>
         </div>
 

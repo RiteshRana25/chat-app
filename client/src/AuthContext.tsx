@@ -10,11 +10,27 @@ import {
 import { api, getToken, setToken, type User } from "./api";
 import { dictionaries, type Dict, type Lang } from "./i18n";
 
+export type Theme = "light" | "dark";
+
+const THEME_KEY = "ffc-theme";
+
+function readStoredTheme(): Theme {
+  try {
+    const v = localStorage.getItem(THEME_KEY);
+    if (v === "dark" || v === "light") return v;
+  } catch {
+    /* ignore */
+  }
+  return "light";
+}
+
 interface AuthState {
   user: User | null;
   loading: boolean;
   lang: Lang;
   t: Dict;
+  theme: Theme;
+  setTheme: (theme: Theme) => void;
   login: (email: string, password: string) => Promise<void>;
   register: (
     email: string,
@@ -34,9 +50,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [uiLang, setUiLang] = useState<Lang>("en");
+  const [theme, setThemeState] = useState<Theme>(() => readStoredTheme());
 
   const lang: Lang = user?.language ?? uiLang;
   const t = dictionaries[lang];
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    try {
+      localStorage.setItem(THEME_KEY, theme);
+    } catch {
+      /* ignore */
+    }
+  }, [theme]);
+
+  const setTheme = useCallback((next: Theme) => {
+    setThemeState(next);
+  }, []);
 
   useEffect(() => {
     const token = getToken();
@@ -104,6 +134,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loading,
       lang,
       t,
+      theme,
+      setTheme,
       login,
       register,
       logout,
@@ -116,6 +148,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loading,
       lang,
       t,
+      theme,
+      setTheme,
       login,
       register,
       logout,
