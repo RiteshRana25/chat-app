@@ -1,54 +1,34 @@
-import { useEffect, useRef } from "react";
-import { io, type Socket } from "socket.io-client";
-import { getToken } from "./api";
+import { useEffect, useRef, useState } from "react";
 import type { ChatMessage } from "./api";
-import { API_BASE } from "./config";
+import { useSocketContext, type SocketHandlers } from "./SocketProvider";
 
-export function useSocket(handlers: {
-  onMessage?: (msg: ChatMessage) => void;
-  onTranslated?: (payload: {
-    id: string;
-    conversationId: string;
-    text: string;
-    originalText: string;
-    translating: boolean;
-  }) => void;
-  onConnect?: () => void;
-  onDisconnect?: () => void;
-}) {
-  const socketRef = useRef<Socket | null>(null);
+export function useSocket(handlers: SocketHandlers) {
+  const { subscribe, sendMessage, connected } = useSocketContext();
   const handlersRef = useRef(handlers);
   handlersRef.current = handlers;
+  const [localConnected, setLocalConnected] = useState(connected);
 
   useEffect(() => {
-    const token = getToken();
-    if (!token) return;
+    setLocalConnected(connected);
+  }, [connected]);
 
-    const socket = io(API_BASE || "/", {
-      auth: { token },
-      transports: ["websocket", "polling"],
+  useEffect(() => {
+    return subscribe({
+      onConnect: () => {
+        setLocalConnected(true);
+        handlersRef.current.onConnect?.();
+      },
+      onDisconnect: () => {
+        setLocalConnected(false);
+        handlersRef.current.onDisconnect?.();
+      },
+      onMessage: (msg: ChatMessage) => handlersRef.current.onMessage?.(msg),
+      onTranslated: (payload) => handlersRef.current.onTranslated?.(payload),
     });
-    socketRef.current = socket;
-
-    socket.on("connect", () => handlersRef.current.onConnect?.());
-    socket.on("disconnect", () => handlersRef.current.onDisconnect?.());
-    socket.on("message", (msg: ChatMessage) =>
-      handlersRef.current.onMessage?.(msg)
-    );
-    socket.on("message_translated", (payload) =>
-      handlersRef.current.onTranslated?.(payload)
-    );
-
-    return () => {
-      socket.disconnect();
-      socketRef.current = null;
-    };
-  }, []);
+  }, [subscribe]);
 
   return {
-    sendMessage: (conversationId: string, text: string) => {
-      socketRef.current?.emit("send_message", { conversationId, text });
-    },
-    connected: () => !!socketRef.current?.connected,
+    sendMessage,
+    connected: () => localConnected,
   };
 }

@@ -58,7 +58,8 @@ async function request<T>(
   const res = await fetch(apiUrl(path), { ...options, headers });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error((data as { error?: string }).error || "Request failed");
+    const msg = (data as { error?: string }).error;
+    throw new Error(msg || `Request failed (${res.status})`);
   }
   return data as T;
 }
@@ -96,4 +97,15 @@ export const api = {
     ),
   messages: (id: string) =>
     request<{ messages: ChatMessage[] }>(`/api/conversations/${id}/messages`),
+  getPushPublicKey: () => request<{ publicKey: string }>("/api/push/public-key"),
+  subscribePush: (subscription: PushSubscriptionJSON) =>
+    request<{ ok: boolean }>("/api/push/subscribe", {
+      method: "POST",
+      body: JSON.stringify({ subscription }),
+    }),
+  unsubscribePush: (endpoint: string) =>
+    request<{ ok: boolean }>("/api/push/subscribe", {
+      method: "DELETE",
+      body: JSON.stringify({ endpoint }),
+    }),
 };

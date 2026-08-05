@@ -1,7 +1,8 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { api, type ConversationSummary } from "./api";
+import { api, type ChatMessage, type ConversationSummary } from "./api";
 import { useAuth } from "./AuthContext";
+import { useSocket } from "./useSocket";
 
 export function InboxPage() {
   const { t, user, logout } = useAuth();
@@ -22,6 +23,46 @@ export function InboxPage() {
   useEffect(() => {
     load().catch(console.error);
   }, []);
+
+  useSocket({
+    onMessage: (msg: ChatMessage) => {
+      if (msg.senderId === user?.id) return;
+      setConversations((prev) => {
+        const idx = prev.findIndex((c) => c.id === msg.conversationId);
+        if (idx === -1) {
+          load().catch(console.error);
+          return prev;
+        }
+        const next = [...prev];
+        const row = { ...next[idx] };
+        row.lastMessage = {
+          id: msg.id,
+          text: msg.text,
+          senderId: msg.senderId,
+          createdAt: msg.createdAt,
+        };
+        row.updatedAt = msg.createdAt;
+        next.splice(idx, 1);
+        next.unshift(row);
+        return next;
+      });
+    },
+    onTranslated: (payload) => {
+      setConversations((prev) =>
+        prev.map((c) => {
+          if (c.id !== payload.conversationId) return c;
+          if (c.lastMessage?.id !== payload.id) return c;
+          return {
+            ...c,
+            lastMessage: {
+              ...c.lastMessage,
+              text: payload.text,
+            },
+          };
+        })
+      );
+    },
+  });
 
   async function startChat(e: FormEvent) {
     e.preventDefault();

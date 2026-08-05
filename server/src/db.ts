@@ -121,6 +121,18 @@ export async function initDb(): Promise<void> {
 
     CREATE INDEX IF NOT EXISTS messages_conversation_idx
       ON messages (conversation_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS push_subscriptions (
+      id UUID PRIMARY KEY,
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      endpoint TEXT NOT NULL UNIQUE,
+      p256dh TEXT NOT NULL,
+      auth TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS push_subscriptions_user_idx
+      ON push_subscriptions (user_id);
   `);
 
   console.log("Postgres: connected and schema ready");
@@ -263,4 +275,41 @@ export async function findMessageById(id: string): Promise<Message | undefined> 
     [id]
   );
   return rows[0] ? mapMessage(rows[0]) : undefined;
+}
+
+export type PushSubscriptionRow = {
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+};
+
+export async function upsertPushSubscription(
+  userId: string,
+  sub: PushSubscriptionRow
+): Promise<void> {
+  await pool.query(
+    `INSERT INTO push_subscriptions (id, user_id, endpoint, p256dh, auth)
+     VALUES (gen_random_uuid(), $1, $2, $3, $4)
+     ON CONFLICT (endpoint) DO UPDATE
+     SET user_id = EXCLUDED.user_id,
+         p256dh = EXCLUDED.p256dh,
+         auth = EXCLUDED.auth`,
+    [userId, sub.endpoint, sub.p256dh, sub.auth]
+  );
+}
+
+export async function removePushSubscription(endpoint: string): Promise<void> {
+  await pool.query(`DELETE FROM push_subscriptions WHERE endpoint = $1`, [
+    endpoint,
+  ]);
+}
+
+export async function getPushSubscriptionsForUser(
+  userId: string
+): Promise<PushSubscriptionRow[]> {
+  const { rows } = await pool.query<PushSubscriptionRow>(
+    `SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE user_id = $1`,
+    [userId]
+  );
+  return rows;
 }

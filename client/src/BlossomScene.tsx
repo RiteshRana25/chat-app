@@ -179,14 +179,14 @@ const SNOW_CLOUDS = [
 export function BlossomScene({ density = 36, className = "" }: Props) {
   const { t, theme } = useAuth();
   const isDark = theme === "dark";
-  const mode = isDark ? "snow" : "petal";
+  const mode: "petal" | "snow" = isDark ? "snow" : "petal";
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const treeRef = useRef<HTMLButtonElement>(null);
   const canopyRef = useRef<HTMLButtonElement>(null);
   const particlesRef = useRef<Particle[]>([]);
   const sizeRef = useRef({ w: 0, h: 0 });
   const rafRef = useRef(0);
-  const modeRef = useRef(mode);
+  const modeRef = useRef<"petal" | "snow">(mode);
   modeRef.current = mode;
 
   useEffect(() => {
@@ -372,85 +372,60 @@ export function BlossomScene({ density = 36, className = "" }: Props) {
             <ellipse
               cx="210"
               cy="535"
-              rx="110"
+              rx="100"
               ry="16"
-              fill="rgba(180,210,240,0.12)"
+              fill="rgba(180,210,240,0.14)"
+            />
+
+            {/* same thick stem as light mode */}
+            <line
+              x1="210"
+              y1="530"
+              x2="210"
+              y2="70"
+              stroke="#5a6d84"
+              strokeWidth="144"
+              strokeLinecap="round"
             />
             <line
               x1="210"
               y1="530"
               x2="210"
-              y2="120"
-              stroke="#6d7f96"
-              strokeWidth="18"
+              y2="70"
+              stroke="#7d90a8"
+              strokeWidth="56"
               strokeLinecap="round"
+              opacity="0.45"
             />
-            <line
-              x1="210"
-              y1="360"
-              x2="120"
-              y2="240"
-              stroke="#6d7f96"
-              strokeWidth="10"
-              strokeLinecap="round"
-            />
-            <line
-              x1="210"
-              y1="320"
-              x2="300"
-              y2="210"
-              stroke="#6d7f96"
-              strokeWidth="10"
-              strokeLinecap="round"
-            />
-            <line
-              x1="210"
-              y1="250"
-              x2="145"
-              y2="160"
-              stroke="#7f91a8"
-              strokeWidth="8"
-              strokeLinecap="round"
-            />
-            <line
-              x1="210"
-              y1="220"
-              x2="280"
-              y2="130"
-              stroke="#7f91a8"
-              strokeWidth="8"
-              strokeLinecap="round"
-            />
-            <line
-              x1="120"
-              y1="240"
-              x2="85"
-              y2="190"
-              stroke="#8aa0b8"
-              strokeWidth="5"
-              strokeLinecap="round"
-            />
-            <line
-              x1="300"
-              y1="210"
-              x2="340"
-              y2="160"
-              stroke="#8aa0b8"
-              strokeWidth="5"
-              strokeLinecap="round"
-            />
-            <g fill="#eef6ff" opacity="0.92">
-              <ellipse cx="120" cy="236" rx="18" ry="10" />
-              <ellipse cx="300" cy="206" rx="20" ry="11" />
-              <ellipse cx="145" cy="156" rx="16" ry="9" />
-              <ellipse cx="280" cy="126" rx="18" ry="10" />
-              <ellipse cx="210" cy="118" rx="28" ry="14" />
-              <ellipse cx="85" cy="188" rx="12" ry="7" />
-              <ellipse cx="340" cy="158" rx="13" ry="7" />
-              <ellipse cx="210" cy="250" rx="14" ry="7" />
+
+            {/* snow crown — same cluster layout as blossom crown */}
+            <g className="bloom-cluster">
+              <circle cx="210" cy="55" r="58" fill="#eef5ff" />
+              <circle cx="155" cy="70" r="46" fill="#dce8f6" />
+              <circle cx="265" cy="68" r="48" fill="#f5f9ff" />
+              <circle cx="120" cy="115" r="40" fill="#e4eef9" />
+              <circle cx="300" cy="112" r="42" fill="#d7e5f4" />
+              <circle cx="180" cy="120" r="36" fill="#f0f6fc" />
+              <circle cx="240" cy="118" r="34" fill="#cfdff0" />
+              <circle cx="210" cy="145" r="38" fill="#e8f1fa" />
+              <circle cx="95" cy="160" r="32" fill="#dbe7f5" />
+              <circle cx="325" cy="158" r="34" fill="#eef5ff" />
+              <circle cx="150" cy="175" r="28" fill="#f5f9ff" />
+              <circle cx="270" cy="172" r="30" fill="#d4e3f3" />
+              <circle cx="210" cy="195" r="26" fill="#e2edf8" />
             </g>
-            <circle cx="320" cy="70" r="28" fill="#f2f6ff" opacity="0.55" />
-            <circle cx="320" cy="70" r="18" fill="#fff" opacity="0.85" />
+
+            <g fill="#b8cce4" opacity="0.75">
+              <circle cx="210" cy="55" r="7" />
+              <circle cx="155" cy="70" r="5" />
+              <circle cx="265" cy="68" r="5.5" />
+              <circle cx="120" cy="115" r="4.5" />
+              <circle cx="300" cy="112" r="5" />
+              <circle cx="210" cy="145" r="4.5" />
+            </g>
+
+            <circle cx="335" cy="48" r="26" fill="#f2f6ff" opacity="0.4" />
+            <circle cx="335" cy="48" r="16" fill="#fff" opacity="0.75" />
           </svg>
         ) : (
           <svg viewBox="0 0 420 560" className="tree-svg">
