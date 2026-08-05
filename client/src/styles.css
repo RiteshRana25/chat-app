@@ -1541,6 +1541,8 @@ html[data-theme="dark"] .date-chip {
   border-color: rgba(255, 255, 255, 0.12);
   color: var(--ink-soft);
 }
+
+html[data-theme="dark"] .bubble.mine {
   box-shadow: 0 10px 24px rgba(37, 99, 160, 0.35);
   color: #fff;
 }
