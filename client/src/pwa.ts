@@ -2,7 +2,6 @@ import { api } from "./api";
 
 const PUSH_REGISTERED_KEY = "ffc_push_registered";
 export const NOTIF_ICON = "/yin-yang.png";
-export const NOTIF_BADGE = "/yin-yang.png";
 
 let deferredInstall: BeforeInstallPromptEvent | null = null;
 
@@ -144,11 +143,11 @@ export async function showMessageNotification(
 
   const reg = await navigator.serviceWorker.getRegistration();
   if (reg) {
+    // No `badge` — Android renders badges as a white silhouette (white circle).
     await reg.showNotification(title, {
       body,
       tag: messageId,
       icon: NOTIF_ICON,
-      badge: NOTIF_BADGE,
       data: { conversationId },
     });
     return;

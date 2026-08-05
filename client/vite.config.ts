@@ -19,7 +19,7 @@ export default defineConfig({
         name: "Friends Forever Chat",
         short_name: "FFC Chat",
         description: "Talk across languages, instantly.",
-        theme_color: "#9a3f5c",
+        theme_color: "#111111",
         background_color: "#faf6f4",
         display: "standalone",
         orientation: "portrait",

@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useAuth } from "./AuthContext";
 import { BlossomScene } from "./BlossomScene";
+import { BrandLogo } from "./BrandLogo";
 import type { Lang } from "./i18n";
 
 export function AuthPage() {
@@ -52,6 +53,7 @@ export function AuthPage() {
 
       <div className="auth-layout">
         <section className="auth-hero">
+          <BrandLogo size="lg" className="brand-logo-hero" />
           <p className="brand-mark">{t.brand}</p>
           <p className="brand-tag">{t.tagline}</p>
         </section>

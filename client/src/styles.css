@@ -162,6 +162,25 @@ a {
   animation: rise 0.55s var(--ease) both;
 }
 
+.brand-logo {
+  display: block;
+  flex-shrink: 0;
+  border-radius: 50%;
+  object-fit: cover;
+  background: #fff;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+
+.brand-logo-hero {
+  margin-bottom: 1rem;
+}
+
+.brand-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
 .brand-mark {
   margin: 0;
   font-family: var(--font-display);
@@ -200,6 +219,8 @@ a {
   min-height: 100vh;
   display: grid;
   place-items: center;
+  gap: 0.85rem;
+  justify-items: center;
 }
 
 .boot-screen .brand-mark {

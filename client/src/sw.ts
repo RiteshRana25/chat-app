@@ -7,7 +7,6 @@ import { createHandlerBoundToURL } from "workbox-precaching";
 declare let self: ServiceWorkerGlobalScope;
 
 const NOTIF_ICON = "/yin-yang.png";
-const NOTIF_BADGE = "/yin-yang.png";
 
 self.skipWaiting();
 clientsClaim();
@@ -37,6 +36,7 @@ self.addEventListener("push", (event) => {
   const body = payload.body || "New message";
   const tag = payload.messageId || payload.conversationId || "ffc-message";
   const conversationId = payload.conversationId || "";
+  const iconUrl = new URL(NOTIF_ICON, self.location.origin).href;
 
   event.waitUntil(
     (async () => {
@@ -59,11 +59,12 @@ self.addEventListener("push", (event) => {
       // App closed / backgrounded → always show. Only skip if that chat is open & focused.
       if (viewingChat) return;
 
+      // Use yin-yang as the main notification icon only.
+      // Do NOT set `badge` — Android turns badges into a white silhouette (white circle).
       await self.registration.showNotification(title, {
         body,
         tag,
-        icon: NOTIF_ICON,
-        badge: NOTIF_BADGE,
+        icon: iconUrl,
         data: { conversationId: conversationId || "/" },
       } as NotificationOptions);
     })()
