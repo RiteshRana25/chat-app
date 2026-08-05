@@ -16,10 +16,14 @@ import {
   findUserById,
   getConversationsForUser,
   getMessages,
+  getPushSubscriptionsForUser,
   initDb,
+  removePushSubscription,
   updateMessage,
   updateUser,
+  upsertPushSubscription,
 } from "./db.js";
+import { getVapidPublicKey, initPush, sendPush, type PushPayload } from "./push.js";
 import { detectLang, translateText } from "./translate.js";
 import type { Lang, Message, PublicUser } from "./types.js";
 
@@ -348,7 +352,66 @@ app.get("/api/conversations/:id/messages", authMiddleware, async (req, res) => {
   res.json({ messages });
 });
 
+app.get("/api/push/public-key", authMiddleware, (_req, res) => {
+  const publicKey = getVapidPublicKey();
+  if (!publicKey) {
+    res.status(503).json({ error: "Push notifications not configured" });
+    return;
+  }
+  res.json({ publicKey });
+});
+
+app.post("/api/push/subscribe", authMiddleware, async (req, res) => {
+  const userId = (req as express.Request & { userId: string }).userId;
+  const { subscription } = req.body as {
+    subscription?: {
+      endpoint?: string;
+      keys?: { p256dh?: string; auth?: string };
+    };
+  };
+
+  if (
+    !subscription?.endpoint ||
+    !subscription.keys?.p256dh ||
+    !subscription.keys?.auth
+  ) {
+    res.status(400).json({ error: "Invalid subscription" });
+    return;
+  }
+
+  await upsertPushSubscription(userId, {
+    endpoint: subscription.endpoint,
+    p256dh: subscription.keys.p256dh,
+    auth: subscription.keys.auth,
+  });
+  res.json({ ok: true });
+});
+
+app.delete("/api/push/subscribe", authMiddleware, async (req, res) => {
+  const { endpoint } = req.body as { endpoint?: string };
+  if (!endpoint) {
+    res.status(400).json({ error: "Endpoint required" });
+    return;
+  }
+  await removePushSubscription(endpoint);
+  res.json({ ok: true });
+});
+
 const onlineUsers = new Map<string, Set<string>>();
+
+async function pushToUser(userId: string, payload: PushPayload): Promise<void> {
+  const subs = await getPushSubscriptionsForUser(userId);
+  for (const sub of subs) {
+    const ok = await sendPush(
+      {
+        endpoint: sub.endpoint,
+        keys: { p256dh: sub.p256dh, auth: sub.auth },
+      },
+      payload
+    );
+    if (!ok) await removePushSubscription(sub.endpoint);
+  }
+}
 
 io.use((socket, next) => {
   const token = socket.handshake.auth?.token as string | undefined;
@@ -415,10 +478,12 @@ io.on("connection", (socket) => {
       translating: needsTranslate,
     });
 
+    let recipientText = text;
     if (needsTranslate) {
       const translated = await translateText(text, other.language, sourceLang);
       message.translations[other.language] = translated;
       await updateMessage(message);
+      recipientText = translated;
 
       io.to(`user:${otherId}`).emit("message_translated", {
         id: message.id,
@@ -428,6 +493,15 @@ io.on("connection", (socket) => {
         translating: false,
       });
     }
+
+    // Always push so phones still get alerts when the socket looks "online"
+    // but the app is backgrounded. Body uses the recipient's language.
+    await pushToUser(otherId, {
+      title: sender.displayName,
+      body: recipientText,
+      conversationId,
+      messageId: message.id,
+    });
   });
 
   socket.on("disconnect", () => {
@@ -442,6 +516,7 @@ io.on("connection", (socket) => {
 async function start() {
   try {
     await initDb();
+    initPush();
     const host = process.env.HOST || "0.0.0.0";
     server.listen(PORT, host, () => {
       console.log(

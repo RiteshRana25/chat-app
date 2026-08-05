@@ -4,7 +4,31 @@ import { AuthPage } from "./AuthPage";
 import { BlossomScene } from "./BlossomScene";
 import { ChatPage } from "./ChatPage";
 import { InboxPage } from "./InboxPage";
+import { MessageNotifications } from "./MessageNotifications";
 import { SettingsPage } from "./SettingsPage";
+import { SocketProvider } from "./SocketProvider";
+
+function AuthenticatedApp() {
+  const { theme } = useAuth();
+
+  return (
+    <SocketProvider>
+      <MessageNotifications />
+      <div className="app-with-blossom">
+        <BlossomScene
+          density={theme === "dark" ? 42 : 18}
+          className="blossom-dim"
+        />
+        <Routes>
+          <Route path="/" element={<InboxPage />} />
+          <Route path="/chat/:id" element={<ChatPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </div>
+    </SocketProvider>
+  );
+}
 
 export default function App() {
   const { user, loading, t } = useAuth();
@@ -21,15 +45,5 @@ export default function App() {
     return <AuthPage />;
   }
 
-  return (
-    <div className="app-with-blossom">
-      <BlossomScene density={18} className="blossom-dim" />
-      <Routes>
-        <Route path="/" element={<InboxPage />} />
-        <Route path="/chat/:id" element={<ChatPage />} />
-        <Route path="/settings" element={<SettingsPage />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </div>
-  );
+  return <AuthenticatedApp />;
 }

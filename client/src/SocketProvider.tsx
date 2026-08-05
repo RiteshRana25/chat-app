@@ -1,0 +1,109 @@
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { io, type Socket } from "socket.io-client";
+import { getToken, type ChatMessage } from "./api";
+import { API_BASE } from "./config";
+import { useAuth } from "./AuthContext";
+
+export type SocketHandlers = {
+  onMessage?: (msg: ChatMessage) => void;
+  onTranslated?: (payload: {
+    id: string;
+    conversationId: string;
+    text: string;
+    originalText: string;
+    translating: boolean;
+  }) => void;
+  onConnect?: () => void;
+  onDisconnect?: () => void;
+};
+
+type SocketContextValue = {
+  connected: boolean;
+  sendMessage: (conversationId: string, text: string) => void;
+  subscribe: (handlers: SocketHandlers) => () => void;
+};
+
+const SocketContext = createContext<SocketContextValue | null>(null);
+
+export function SocketProvider({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
+  const socketRef = useRef<Socket | null>(null);
+  const listenersRef = useRef(new Set<SocketHandlers>());
+  const [connected, setConnected] = useState(false);
+
+  useEffect(() => {
+    if (!user) {
+      socketRef.current?.disconnect();
+      socketRef.current = null;
+      setConnected(false);
+      return;
+    }
+
+    const token = getToken();
+    if (!token) return;
+
+    const socket = io(API_BASE || "/", {
+      auth: { token },
+      transports: ["websocket", "polling"],
+    });
+    socketRef.current = socket;
+
+    socket.on("connect", () => {
+      setConnected(true);
+      listenersRef.current.forEach((h) => h.onConnect?.());
+    });
+    socket.on("disconnect", () => {
+      setConnected(false);
+      listenersRef.current.forEach((h) => h.onDisconnect?.());
+    });
+    socket.on("message", (msg: ChatMessage) => {
+      listenersRef.current.forEach((h) => h.onMessage?.(msg));
+    });
+    socket.on("message_translated", (payload) => {
+      listenersRef.current.forEach((h) => h.onTranslated?.(payload));
+    });
+
+    return () => {
+      socket.disconnect();
+      socketRef.current = null;
+      setConnected(false);
+    };
+  }, [user?.id]);
+
+  const subscribe = useCallback((handlers: SocketHandlers) => {
+    listenersRef.current.add(handlers);
+    return () => {
+      listenersRef.current.delete(handlers);
+    };
+  }, []);
+
+  const sendMessage = useCallback((conversationId: string, text: string) => {
+    socketRef.current?.emit("send_message", { conversationId, text });
+  }, []);
+
+  const value = useMemo(
+    () => ({ connected, sendMessage, subscribe }),
+    [connected, sendMessage, subscribe]
+  );
+
+  return (
+    <SocketContext.Provider value={value}>{children}</SocketContext.Provider>
+  );
+}
+
+export function useSocketContext(): SocketContextValue {
+  const ctx = useContext(SocketContext);
+  if (!ctx) {
+    throw new Error("useSocketContext must be used within SocketProvider");
+  }
+  return ctx;
+}

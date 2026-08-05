@@ -29,6 +29,9 @@ Or leave Root Directory empty — root `railway.toml` will install/start the ser
 | `DATABASE_URL` | your Neon connection string |
 | `JWT_SECRET` | same long secret from local `.env` |
 | `DEEPL_API_KEY` | your DeepL key |
+| `VAPID_PUBLIC_KEY` | from `npx web-push generate-vapid-keys` (same as local `server/.env`) |
+| `VAPID_PRIVATE_KEY` | matching private key |
+| `VAPID_SUBJECT` | e.g. `mailto:hello@friendforeverchat.app` |
 | `CLIENT_ORIGIN` | leave empty for now; set to Netlify URL later (e.g. `https://yoursite.netlify.app`) |
 
 5. **Settings → Networking → Generate Domain**  
