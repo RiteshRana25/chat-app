@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "./AuthContext";
 import { AuthPage } from "./AuthPage";
 import { BlossomScene } from "./BlossomScene";
+import { BrandLogo } from "./BrandLogo";
 import { ChatPage } from "./ChatPage";
 import { InboxPage } from "./InboxPage";
 import { MessageNotifications } from "./MessageNotifications";
@@ -36,6 +37,7 @@ export default function App() {
   if (loading) {
     return (
       <div className="boot-screen">
+        <BrandLogo size="lg" />
         <p className="brand-mark">{t.brand}</p>
       </div>
     );

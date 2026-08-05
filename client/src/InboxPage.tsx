@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, type ChatMessage, type ConversationSummary } from "./api";
 import { useAuth } from "./AuthContext";
+import { BrandLogo } from "./BrandLogo";
 import { useSocket } from "./useSocket";
 
 export function InboxPage() {
@@ -81,9 +82,12 @@ export function InboxPage() {
   return (
     <div className="app-shell">
       <header className="topbar">
-        <div>
-          <p className="brand-mark small">{t.brand}</p>
-          <h1>{t.inbox}</h1>
+        <div className="brand-heading">
+          <BrandLogo size="sm" />
+          <div>
+            <p className="brand-mark small">{t.brand}</p>
+            <h1>{t.inbox}</h1>
+          </div>
         </div>
         <div className="topbar-actions">
           <Link to="/settings" className="ghost-btn">
