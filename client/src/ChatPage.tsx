@@ -1,7 +1,14 @@
-import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type KeyboardEvent,
+} from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, type ChatMessage, type User } from "./api";
 import { useAuth } from "./AuthContext";
+import { TypingCat } from "./TypingCat";
 import { useSocket } from "./useSocket";
 
 export function ChatPage() {
@@ -12,11 +19,22 @@ export function ChatPage() {
   const [text, setText] = useState("");
   const [connected, setConnected] = useState(false);
   const [peekId, setPeekId] = useState<string | null>(null);
+  const [otherTyping, setOtherTyping] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const otherTypingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
+  const isTypingRef = useRef(false);
+  const focusedRef = useRef(false);
+  const sendTypingRef = useRef<(conversationId: string, typing: boolean) => void>(
+    () => {}
+  );
 
   useEffect(() => {
     if (!id) return;
+    setOtherTyping(false);
     Promise.all([api.messages(id), api.conversations()]).then(
       ([msgRes, convRes]) => {
         setMessages(msgRes.messages);
@@ -28,7 +46,7 @@ export function ChatPage() {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [messages, otherTyping]);
 
   useEffect(() => {
     const el = inputRef.current;
@@ -37,11 +55,24 @@ export function ChatPage() {
     el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
   }, [text]);
 
-  const { sendMessage } = useSocket({
+  useEffect(() => {
+    return () => {
+      if (heartbeatRef.current) clearInterval(heartbeatRef.current);
+      if (otherTypingTimeoutRef.current) {
+        clearTimeout(otherTypingTimeoutRef.current);
+      }
+      if (id && isTypingRef.current) {
+        sendTypingRef.current(id, false);
+      }
+    };
+  }, [id]);
+
+  const { sendMessage, sendTyping } = useSocket({
     onConnect: () => setConnected(true),
     onDisconnect: () => setConnected(false),
     onMessage: (msg) => {
       if (msg.conversationId !== id) return;
+      if (msg.senderId !== user?.id) setOtherTyping(false);
       setMessages((prev) => {
         if (prev.some((m) => m.id === msg.id)) return prev;
         return [...prev, msg];
@@ -62,11 +93,61 @@ export function ChatPage() {
         )
       );
     },
+    onTyping: (payload) => {
+      if (payload.conversationId !== id) return;
+      if (payload.userId === user?.id) return;
+      if (otherTypingTimeoutRef.current) {
+        clearTimeout(otherTypingTimeoutRef.current);
+        otherTypingTimeoutRef.current = null;
+      }
+      setOtherTyping(payload.typing);
+      // Safety clear if the other side disconnects without sending stop
+      if (payload.typing) {
+        otherTypingTimeoutRef.current = setTimeout(() => {
+          setOtherTyping(false);
+        }, 5000);
+      }
+    },
   });
+
+  sendTypingRef.current = sendTyping;
+
+  function clearHeartbeat() {
+    if (heartbeatRef.current) {
+      clearInterval(heartbeatRef.current);
+      heartbeatRef.current = null;
+    }
+  }
+
+  function stopTyping() {
+    clearHeartbeat();
+    if (!id || !isTypingRef.current) return;
+    isTypingRef.current = false;
+    sendTyping(id, false);
+  }
+
+  function startTyping() {
+    if (!id) return;
+    if (!isTypingRef.current) {
+      isTypingRef.current = true;
+      sendTyping(id, true);
+    }
+    clearHeartbeat();
+    // Keep indicator alive while focused with text
+    heartbeatRef.current = setInterval(() => {
+      if (id && isTypingRef.current) sendTyping(id, true);
+    }, 2000);
+  }
+
+  function syncTyping(nextText: string, focused: boolean) {
+    if (focused && nextText.trim().length > 0) startTyping();
+    else stopTyping();
+  }
 
   function onSend(e: FormEvent) {
     e.preventDefault();
     if (!id || !text.trim()) return;
+    stopTyping();
     sendMessage(id, text.trim());
     setText("");
   }
@@ -79,6 +160,7 @@ export function ChatPage() {
     if (isCoarse) return;
     e.preventDefault();
     if (!id || !text.trim()) return;
+    stopTyping();
     sendMessage(id, text.trim());
     setText("");
   }
@@ -110,7 +192,7 @@ export function ChatPage() {
       </header>
 
       <div className="message-stream">
-        {messages.length === 0 && (
+        {messages.length === 0 && !otherTyping && (
           <p className="empty-state center">{t.emptyChat}</p>
         )}
         {messages.map((m) => {
@@ -141,6 +223,7 @@ export function ChatPage() {
             </button>
           );
         })}
+        {otherTyping && <TypingCat label={t.typing} />}
         <div ref={bottomRef} />
       </div>
 
@@ -148,7 +231,19 @@ export function ChatPage() {
         <textarea
           ref={inputRef}
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            const next = e.target.value;
+            setText(next);
+            syncTyping(next, focusedRef.current);
+          }}
+          onFocus={() => {
+            focusedRef.current = true;
+            syncTyping(text, true);
+          }}
+          onBlur={() => {
+            focusedRef.current = false;
+            stopTyping();
+          }}
           onKeyDown={onKeyDown}
           placeholder={t.typeMessage}
           rows={1}

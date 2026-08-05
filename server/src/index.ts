@@ -504,6 +504,28 @@ io.on("connection", (socket) => {
     });
   });
 
+  socket.on(
+    "typing",
+    async (payload: { conversationId?: string; typing?: boolean }) => {
+      const conversationId = payload?.conversationId;
+      if (!conversationId) return;
+
+      const conversation = await findConversationById(conversationId);
+      if (!conversation || !conversation.participantIds.includes(userId)) {
+        return;
+      }
+
+      const otherId = conversation.participantIds.find((id) => id !== userId);
+      if (!otherId) return;
+
+      io.to(`user:${otherId}`).emit("typing", {
+        conversationId,
+        userId,
+        typing: !!payload.typing,
+      });
+    }
+  );
+
   socket.on("disconnect", () => {
     const set = onlineUsers.get(userId);
     if (set) {
