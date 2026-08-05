@@ -399,6 +399,27 @@ app.delete("/api/push/subscribe", authMiddleware, async (req, res) => {
 
 const onlineUsers = new Map<string, Set<string>>();
 
+function isUserOnline(userId: string): boolean {
+  const set = onlineUsers.get(userId);
+  return !!set && set.size > 0;
+}
+
+async function notifyPresence(userId: string, online: boolean): Promise<void> {
+  try {
+    const conversations = await getConversationsForUser(userId);
+    for (const c of conversations) {
+      const otherId = c.participantIds.find((id) => id !== userId);
+      if (!otherId) continue;
+      io.to(`user:${otherId}`).emit("presence", {
+        userId,
+        online,
+      });
+    }
+  } catch (err) {
+    console.warn("presence notify failed:", err);
+  }
+}
+
 async function pushToUser(userId: string, payload: PushPayload): Promise<void> {
   const subs = await getPushSubscriptionsForUser(userId);
   for (const sub of subs) {
@@ -427,9 +448,22 @@ io.use((socket, next) => {
 
 io.on("connection", (socket) => {
   const userId = (socket as typeof socket & { userId: string }).userId;
+  const wasOffline = !isUserOnline(userId);
   if (!onlineUsers.has(userId)) onlineUsers.set(userId, new Set());
   onlineUsers.get(userId)!.add(socket.id);
   socket.join(`user:${userId}`);
+  if (wasOffline) {
+    void notifyPresence(userId, true);
+  }
+
+  socket.on("presence_check", async (payload: { userId?: string }) => {
+    const targetId = payload?.userId;
+    if (!targetId) return;
+    socket.emit("presence", {
+      userId: targetId,
+      online: isUserOnline(targetId),
+    });
+  });
 
   socket.on("send_message", async (payload: { conversationId: string; text: string }) => {
     const text = payload?.text?.trim();
@@ -530,7 +564,10 @@ io.on("connection", (socket) => {
     const set = onlineUsers.get(userId);
     if (set) {
       set.delete(socket.id);
-      if (set.size === 0) onlineUsers.delete(userId);
+      if (set.size === 0) {
+        onlineUsers.delete(userId);
+        void notifyPresence(userId, false);
+      }
     }
   });
 });

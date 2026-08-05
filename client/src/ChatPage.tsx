@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useEffect,
   useRef,
   useState,
@@ -8,16 +9,21 @@ import {
 import { Link, useParams } from "react-router-dom";
 import { api, type ChatMessage, type User } from "./api";
 import { useAuth } from "./AuthContext";
+import {
+  formatDayLabel,
+  formatMessageTime,
+  isSameDay,
+} from "./timeFormat";
 import { TypingCat } from "./TypingCat";
 import { useSocket } from "./useSocket";
 
 export function ChatPage() {
   const { id } = useParams<{ id: string }>();
-  const { t, user } = useAuth();
+  const { t, user, lang } = useAuth();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [other, setOther] = useState<User | null>(null);
   const [text, setText] = useState("");
-  const [connected, setConnected] = useState(false);
+  const [otherOnline, setOtherOnline] = useState(false);
   const [peekId, setPeekId] = useState<string | null>(null);
   const [otherTyping, setOtherTyping] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -28,13 +34,17 @@ export function ChatPage() {
   );
   const isTypingRef = useRef(false);
   const focusedRef = useRef(false);
+  const otherIdRef = useRef<string | null>(null);
   const sendTypingRef = useRef<(conversationId: string, typing: boolean) => void>(
     () => {}
   );
 
+  otherIdRef.current = other?.id ?? null;
+
   useEffect(() => {
     if (!id) return;
     setOtherTyping(false);
+    setOtherOnline(false);
     Promise.all([api.messages(id), api.conversations()]).then(
       ([msgRes, convRes]) => {
         setMessages(msgRes.messages);
@@ -67,9 +77,7 @@ export function ChatPage() {
     };
   }, [id]);
 
-  const { sendMessage, sendTyping } = useSocket({
-    onConnect: () => setConnected(true),
-    onDisconnect: () => setConnected(false),
+  const { sendMessage, sendTyping, checkPresence, connected } = useSocket({
     onMessage: (msg) => {
       if (msg.conversationId !== id) return;
       if (msg.senderId !== user?.id) setOtherTyping(false);
@@ -101,14 +109,23 @@ export function ChatPage() {
         otherTypingTimeoutRef.current = null;
       }
       setOtherTyping(payload.typing);
-      // Safety clear if the other side disconnects without sending stop
       if (payload.typing) {
         otherTypingTimeoutRef.current = setTimeout(() => {
           setOtherTyping(false);
         }, 5000);
       }
     },
+    onPresence: (payload) => {
+      if (!otherIdRef.current || payload.userId !== otherIdRef.current) return;
+      setOtherOnline(payload.online);
+      if (!payload.online) setOtherTyping(false);
+    },
   });
+
+  useEffect(() => {
+    if (!other?.id || !connected) return;
+    checkPresence(other.id);
+  }, [other?.id, connected, checkPresence]);
 
   sendTypingRef.current = sendTyping;
 
@@ -133,7 +150,6 @@ export function ChatPage() {
       sendTyping(id, true);
     }
     clearHeartbeat();
-    // Keep indicator alive while focused with text
     heartbeatRef.current = setInterval(() => {
       if (id && isTypingRef.current) sendTyping(id, true);
     }, 2000);
@@ -154,7 +170,6 @@ export function ChatPage() {
 
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key !== "Enter" || e.shiftKey) return;
-    // Mobile soft keyboards often use Enter for newline; only send on desktop-like Enter.
     if (e.nativeEvent.isComposing) return;
     const isCoarse = window.matchMedia("(pointer: coarse)").matches;
     if (isCoarse) return;
@@ -175,17 +190,26 @@ export function ChatPage() {
           <span className="back-label">{t.back}</span>
         </Link>
         <div className="chat-heading">
-          <div className="avatar tiny">
-            {(other?.displayName || "?")[0].toUpperCase()}
-          </div>
+          <img
+            className="presence-gif"
+            src={
+              otherOnline ? "/presence-online.gif" : "/presence-offline.gif"
+            }
+            alt=""
+            width={52}
+            height={52}
+            decoding="async"
+          />
           <div className="chat-title">
             <strong>{other?.displayName || "…"}</strong>
             <span className="chat-email">{other?.email}</span>
             <span
-              className={`chat-presence status-dot ${connected ? "on" : "off"}`}
+              className={`chat-presence status-dot ${
+                otherOnline ? "on" : "off"
+              }`}
             >
               <i />
-              {connected ? t.online : t.offline}
+              {otherOnline ? t.online : t.offline}
             </span>
           </div>
         </div>
@@ -195,32 +219,47 @@ export function ChatPage() {
         {messages.length === 0 && !otherTyping && (
           <p className="empty-state center">{t.emptyChat}</p>
         )}
-        {messages.map((m) => {
+        {messages.map((m, index) => {
           const mine = m.senderId === user?.id;
+          const prev = index > 0 ? messages[index - 1] : null;
+          const showDay =
+            !prev || !isSameDay(prev.createdAt, m.createdAt, lang);
           const showOriginal =
             peekId === m.id &&
             !mine &&
             m.originalText &&
             m.originalText !== m.text;
           return (
-            <button
-              type="button"
-              key={m.id}
-              className={`bubble ${mine ? "mine" : "theirs"}`}
-              onClick={() =>
-                setPeekId(peekId === m.id ? null : !mine ? m.id : null)
-              }
-            >
-              <p>{m.text}</p>
-              {m.translating && (
-                <span className="translating">{t.translating}</span>
+            <Fragment key={m.id}>
+              {showDay && (
+                <div className="date-chip">
+                  {formatDayLabel(m.createdAt, lang, {
+                    today: t.today,
+                    yesterday: t.yesterday,
+                  })}
+                </div>
               )}
-              {showOriginal && (
-                <span className="original-peek">
-                  {t.original}: {m.originalText}
+              <button
+                type="button"
+                className={`bubble ${mine ? "mine" : "theirs"}`}
+                onClick={() =>
+                  setPeekId(peekId === m.id ? null : !mine ? m.id : null)
+                }
+              >
+                <p>{m.text}</p>
+                {m.translating && (
+                  <span className="translating">{t.translating}</span>
+                )}
+                {showOriginal && (
+                  <span className="original-peek">
+                    {t.original}: {m.originalText}
+                  </span>
+                )}
+                <span className="bubble-time">
+                  {formatMessageTime(m.createdAt, lang)}
                 </span>
-              )}
-            </button>
+              </button>
+            </Fragment>
           );
         })}
         {otherTyping && <TypingCat label={t.typing} />}

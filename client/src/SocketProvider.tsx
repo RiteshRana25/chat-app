@@ -19,6 +19,11 @@ export type TypingPayload = {
   typing: boolean;
 };
 
+export type PresencePayload = {
+  userId: string;
+  online: boolean;
+};
+
 export type SocketHandlers = {
   onMessage?: (msg: ChatMessage) => void;
   onTranslated?: (payload: {
@@ -29,6 +34,7 @@ export type SocketHandlers = {
     translating: boolean;
   }) => void;
   onTyping?: (payload: TypingPayload) => void;
+  onPresence?: (payload: PresencePayload) => void;
   onConnect?: () => void;
   onDisconnect?: () => void;
 };
@@ -37,6 +43,7 @@ type SocketContextValue = {
   connected: boolean;
   sendMessage: (conversationId: string, text: string) => void;
   sendTyping: (conversationId: string, typing: boolean) => void;
+  checkPresence: (userId: string) => void;
   subscribe: (handlers: SocketHandlers) => () => void;
 };
 
@@ -82,6 +89,9 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     socket.on("typing", (payload: TypingPayload) => {
       listenersRef.current.forEach((h) => h.onTyping?.(payload));
     });
+    socket.on("presence", (payload: PresencePayload) => {
+      listenersRef.current.forEach((h) => h.onPresence?.(payload));
+    });
 
     return () => {
       socket.disconnect();
@@ -105,9 +115,19 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     socketRef.current?.emit("typing", { conversationId, typing });
   }, []);
 
+  const checkPresence = useCallback((targetUserId: string) => {
+    socketRef.current?.emit("presence_check", { userId: targetUserId });
+  }, []);
+
   const value = useMemo(
-    () => ({ connected, sendMessage, sendTyping, subscribe }),
-    [connected, sendMessage, sendTyping, subscribe]
+    () => ({
+      connected,
+      sendMessage,
+      sendTyping,
+      checkPresence,
+      subscribe,
+    }),
+    [connected, sendMessage, sendTyping, checkPresence, subscribe]
   );
 
   return (
