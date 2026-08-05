@@ -53,8 +53,6 @@ export function formatDayLabel(
   if (target === yesterday) return labels.yesterday;
 
   const date = new Date(iso);
-  const startOfToday = new Date(now);
-  // Compare calendar distance in the user's timezone via day keys is enough for week check
   const [ty, tm, td] = today.split("-").map(Number);
   const [dy, dm, dd] = target.split("-").map(Number);
   const todayUtc = Date.UTC(ty, tm - 1, td);
