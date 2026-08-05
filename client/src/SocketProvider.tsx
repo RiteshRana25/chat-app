@@ -13,6 +13,12 @@ import { getToken, type ChatMessage } from "./api";
 import { API_BASE } from "./config";
 import { useAuth } from "./AuthContext";
 
+export type TypingPayload = {
+  conversationId: string;
+  userId: string;
+  typing: boolean;
+};
+
 export type SocketHandlers = {
   onMessage?: (msg: ChatMessage) => void;
   onTranslated?: (payload: {
@@ -22,6 +28,7 @@ export type SocketHandlers = {
     originalText: string;
     translating: boolean;
   }) => void;
+  onTyping?: (payload: TypingPayload) => void;
   onConnect?: () => void;
   onDisconnect?: () => void;
 };
@@ -29,6 +36,7 @@ export type SocketHandlers = {
 type SocketContextValue = {
   connected: boolean;
   sendMessage: (conversationId: string, text: string) => void;
+  sendTyping: (conversationId: string, typing: boolean) => void;
   subscribe: (handlers: SocketHandlers) => () => void;
 };
 
@@ -71,6 +79,9 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     socket.on("message_translated", (payload) => {
       listenersRef.current.forEach((h) => h.onTranslated?.(payload));
     });
+    socket.on("typing", (payload: TypingPayload) => {
+      listenersRef.current.forEach((h) => h.onTyping?.(payload));
+    });
 
     return () => {
       socket.disconnect();
@@ -90,9 +101,13 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     socketRef.current?.emit("send_message", { conversationId, text });
   }, []);
 
+  const sendTyping = useCallback((conversationId: string, typing: boolean) => {
+    socketRef.current?.emit("typing", { conversationId, typing });
+  }, []);
+
   const value = useMemo(
-    () => ({ connected, sendMessage, subscribe }),
-    [connected, sendMessage, subscribe]
+    () => ({ connected, sendMessage, sendTyping, subscribe }),
+    [connected, sendMessage, sendTyping, subscribe]
   );
 
   return (
