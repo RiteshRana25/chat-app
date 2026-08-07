@@ -25,7 +25,8 @@ import {
 } from "./db.js";
 import { getVapidPublicKey, initPush, sendPush, type PushPayload } from "./push.js";
 import { detectLang, translateText } from "./translate.js";
-import type { Lang, Message, PublicUser } from "./types.js";
+import type { Lang, Message, MessageAttachment, PublicUser } from "./types.js";
+import { upload, uploadBufferToCloudinary, isCloudinaryConfigured } from "./upload.js";
 
 const PORT = Number(process.env.PORT) || 3001;
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -93,7 +94,15 @@ const corsOptions: cors.CorsOptions = {
 
 const app = express();
 app.use(cors(corsOptions));
-app.use(express.json());
+app.use(express.json({ limit: "2mb" }));
+
+if (!isCloudinaryConfigured()) {
+  console.warn(
+    "Cloudinary not configured — set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET"
+  );
+} else {
+  console.log("Cloudinary: enabled");
+}
 
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -152,6 +161,33 @@ function displayForViewer(message: Message, viewerLang: Lang, viewerId: string) 
     return message.originalText;
   }
   return message.translations[viewerLang] ?? message.originalText;
+}
+
+function previewText(message: Message, viewerLang: Lang, viewerId: string): string {
+  const text = displayForViewer(message, viewerLang, viewerId).trim();
+  if (text) return text;
+  if (!message.attachment) return "";
+  if (message.attachment.mime.startsWith("image/")) return "📷 Photo";
+  if (message.attachment.mime.startsWith("video/")) return "🎬 Video";
+  return `📎 ${message.attachment.name}`;
+}
+
+function toClientMessage(
+  message: Message,
+  viewerLang: Lang,
+  viewerId: string,
+  translating = false
+) {
+  return {
+    id: message.id,
+    conversationId: message.conversationId,
+    senderId: message.senderId,
+    text: displayForViewer(message, viewerLang, viewerId),
+    originalText: message.originalText,
+    createdAt: message.createdAt,
+    translating,
+    attachment: message.attachment ?? null,
+  };
 }
 
 app.get("/api/health", (_req, res) => {
@@ -282,7 +318,7 @@ app.get("/api/conversations", authMiddleware, async (req, res) => {
         lastMessage: last
           ? {
               id: last.id,
-              text: displayForViewer(last, me.language, userId),
+              text: previewText(last, me.language, userId),
               senderId: last.senderId,
               createdAt: last.createdAt,
             }
@@ -337,19 +373,45 @@ app.get("/api/conversations/:id/messages", authMiddleware, async (req, res) => {
     res.status(404).json({ error: "User not found" });
     return;
   }
-  const messages = (await getMessages(conversation.id)).map((m) => ({
-    id: m.id,
-    conversationId: m.conversationId,
-    senderId: m.senderId,
-    text: displayForViewer(m, me.language, userId),
-    originalText: m.originalText,
-    createdAt: m.createdAt,
-    translating:
+  const messages = (await getMessages(conversation.id)).map((m) =>
+    toClientMessage(
+      m,
+      me.language,
+      userId,
       m.senderId !== userId &&
-      !m.translations[me.language] &&
-      detectLang(m.originalText) !== me.language,
-  }));
+        !!m.originalText.trim() &&
+        !m.translations[me.language] &&
+        detectLang(m.originalText) !== me.language
+    )
+  );
   res.json({ messages });
+});
+
+app.post("/api/upload", authMiddleware, (req, res) => {
+  upload.single("file")(req, res, async (err: unknown) => {
+    if (err) {
+      const message = err instanceof Error ? err.message : "Upload failed";
+      res.status(400).json({ error: message });
+      return;
+    }
+    const file = req.file;
+    if (!file) {
+      res.status(400).json({ error: "No file uploaded" });
+      return;
+    }
+    try {
+      const attachment = await uploadBufferToCloudinary(file);
+      res.json({ attachment });
+    } catch (uploadErr) {
+      console.warn("Cloudinary upload failed:", uploadErr);
+      res.status(500).json({
+        error:
+          uploadErr instanceof Error
+            ? uploadErr.message
+            : "Cloudinary upload failed",
+      });
+    }
+  });
 });
 
 app.get("/api/push/public-key", authMiddleware, (_req, res) => {
@@ -399,6 +461,27 @@ app.delete("/api/push/subscribe", authMiddleware, async (req, res) => {
 
 const onlineUsers = new Map<string, Set<string>>();
 
+function isUserOnline(userId: string): boolean {
+  const set = onlineUsers.get(userId);
+  return !!set && set.size > 0;
+}
+
+async function notifyPresence(userId: string, online: boolean): Promise<void> {
+  try {
+    const conversations = await getConversationsForUser(userId);
+    for (const c of conversations) {
+      const otherId = c.participantIds.find((id) => id !== userId);
+      if (!otherId) continue;
+      io.to(`user:${otherId}`).emit("presence", {
+        userId,
+        online,
+      });
+    }
+  } catch (err) {
+    console.warn("presence notify failed:", err);
+  }
+}
+
 async function pushToUser(userId: string, payload: PushPayload): Promise<void> {
   const subs = await getPushSubscriptionsForUser(userId);
   for (const sub of subs) {
@@ -427,82 +510,109 @@ io.use((socket, next) => {
 
 io.on("connection", (socket) => {
   const userId = (socket as typeof socket & { userId: string }).userId;
+  const wasOffline = !isUserOnline(userId);
   if (!onlineUsers.has(userId)) onlineUsers.set(userId, new Set());
   onlineUsers.get(userId)!.add(socket.id);
   socket.join(`user:${userId}`);
+  if (wasOffline) {
+    void notifyPresence(userId, true);
+  }
 
-  socket.on("send_message", async (payload: { conversationId: string; text: string }) => {
-    const text = payload?.text?.trim();
-    const conversationId = payload?.conversationId;
-    if (!text || !conversationId) return;
-
-    const conversation = await findConversationById(conversationId);
-    if (!conversation || !conversation.participantIds.includes(userId)) return;
-
-    const sender = await findUserById(userId);
-    if (!sender) return;
-
-    const otherId = conversation.participantIds.find((id) => id !== userId)!;
-    const other = await findUserById(otherId);
-    if (!other) return;
-
-    const sourceLang = detectLang(text);
-    const message: Message = {
-      id: randomUUID(),
-      conversationId,
-      senderId: userId,
-      originalText: text,
-      translations: { [sourceLang]: text },
-      createdAt: new Date().toISOString(),
-    };
-    await addMessage(message);
-
-    const base = {
-      id: message.id,
-      conversationId: message.conversationId,
-      senderId: message.senderId,
-      originalText: message.originalText,
-      createdAt: message.createdAt,
-    };
-
-    io.to(`user:${userId}`).emit("message", {
-      ...base,
-      text: text,
-      translating: false,
-    });
-
-    const needsTranslate = sourceLang !== other.language;
-    io.to(`user:${otherId}`).emit("message", {
-      ...base,
-      text: text,
-      translating: needsTranslate,
-    });
-
-    let recipientText = text;
-    if (needsTranslate) {
-      const translated = await translateText(text, other.language, sourceLang);
-      message.translations[other.language] = translated;
-      await updateMessage(message);
-      recipientText = translated;
-
-      io.to(`user:${otherId}`).emit("message_translated", {
-        id: message.id,
-        conversationId: message.conversationId,
-        text: translated,
-        originalText: message.originalText,
-        translating: false,
-      });
-    }
-
-    // Always push so phones still get alerts when the socket looks "online"
-    // but the app is backgrounded. Body uses the recipient's language.
-    await pushToUser(otherId, {
-      title: sender.displayName,
-      body: recipientText,
-      conversationId,
-      messageId: message.id,
+  socket.on("presence_check", async (payload: { userId?: string }) => {
+    const targetId = payload?.userId;
+    if (!targetId) return;
+    socket.emit("presence", {
+      userId: targetId,
+      online: isUserOnline(targetId),
     });
   });
+
+  socket.on(
+    "send_message",
+    async (payload: {
+      conversationId: string;
+      text?: string;
+      attachment?: MessageAttachment | null;
+    }) => {
+      const text = payload?.text?.trim() || "";
+      const conversationId = payload?.conversationId;
+      const attachment = payload?.attachment ?? null;
+      if ((!text && !attachment) || !conversationId) return;
+      if (
+        attachment &&
+        (!attachment.url || !attachment.name || !attachment.mime)
+      ) {
+        return;
+      }
+
+      const conversation = await findConversationById(conversationId);
+      if (!conversation || !conversation.participantIds.includes(userId)) {
+        return;
+      }
+
+      const sender = await findUserById(userId);
+      if (!sender) return;
+
+      const otherId = conversation.participantIds.find((id) => id !== userId)!;
+      const other = await findUserById(otherId);
+      if (!other) return;
+
+      const sourceLang = text ? detectLang(text) : other.language;
+      const message: Message = {
+        id: randomUUID(),
+        conversationId,
+        senderId: userId,
+        originalText: text,
+        translations: text ? { [sourceLang]: text } : {},
+        createdAt: new Date().toISOString(),
+        attachment,
+      };
+      await addMessage(message);
+
+      io.to(`user:${userId}`).emit(
+        "message",
+        toClientMessage(message, sender.language, userId, false)
+      );
+
+      const needsTranslate =
+        !!text && sourceLang !== other.language;
+      io.to(`user:${otherId}`).emit(
+        "message",
+        toClientMessage(message, other.language, otherId, needsTranslate)
+      );
+
+      let recipientText = text;
+      if (needsTranslate) {
+        const translated = await translateText(text, other.language, sourceLang);
+        message.translations[other.language] = translated;
+        await updateMessage(message);
+        recipientText = translated;
+
+        io.to(`user:${otherId}`).emit("message_translated", {
+          id: message.id,
+          conversationId: message.conversationId,
+          text: translated,
+          originalText: message.originalText,
+          translating: false,
+        });
+      }
+
+      const pushBody =
+        recipientText ||
+        (attachment?.mime.startsWith("image/")
+          ? "📷 Photo"
+          : attachment?.mime.startsWith("video/")
+            ? "🎬 Video"
+            : `📎 ${attachment?.name || "File"}`);
+
+      await pushToUser(otherId, {
+        title: sender.displayName,
+        body: pushBody,
+        conversationId,
+        messageId: message.id,
+      });
+    }
+  );
 
   socket.on(
     "typing",
@@ -530,7 +640,10 @@ io.on("connection", (socket) => {
     const set = onlineUsers.get(userId);
     if (set) {
       set.delete(socket.id);
-      if (set.size === 0) onlineUsers.delete(userId);
+      if (set.size === 0) {
+        onlineUsers.delete(userId);
+        void notifyPresence(userId, false);
+      }
     }
   });
 });
