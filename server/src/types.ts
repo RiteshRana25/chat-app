@@ -15,6 +15,13 @@ export interface Conversation {
   updatedAt: string;
 }
 
+export interface MessageAttachment {
+  url: string;
+  name: string;
+  mime: string;
+  size: number;
+}
+
 export interface Message {
   id: string;
   conversationId: string;
@@ -22,6 +29,7 @@ export interface Message {
   originalText: string;
   translations: Partial<Record<Lang, string>>;
   createdAt: string;
+  attachment?: MessageAttachment | null;
 }
 
 export type PublicUser = Omit<User, "passwordHash">;

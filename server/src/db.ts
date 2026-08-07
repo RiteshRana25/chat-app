@@ -39,6 +39,10 @@ type MessageRow = {
   original_text: string;
   translations: Partial<Record<Lang, string>> | string;
   created_at: Date | string;
+  attachment_url: string | null;
+  attachment_name: string | null;
+  attachment_mime: string | null;
+  attachment_size: number | null;
 };
 
 function toIso(value: Date | string): string {
@@ -69,6 +73,15 @@ function mapMessage(row: MessageRow): Message {
     typeof row.translations === "string"
       ? (JSON.parse(row.translations) as Partial<Record<Lang, string>>)
       : row.translations || {};
+  const attachment =
+    row.attachment_url && row.attachment_name && row.attachment_mime
+      ? {
+          url: row.attachment_url,
+          name: row.attachment_name,
+          mime: row.attachment_mime,
+          size: Number(row.attachment_size || 0),
+        }
+      : null;
   return {
     id: row.id,
     conversationId: row.conversation_id,
@@ -76,6 +89,7 @@ function mapMessage(row: MessageRow): Message {
     originalText: row.original_text,
     translations,
     createdAt: toIso(row.created_at),
+    attachment,
   };
 }
 
@@ -118,6 +132,11 @@ export async function initDb(): Promise<void> {
       translations JSONB NOT NULL DEFAULT '{}'::jsonb,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+
+    ALTER TABLE messages ADD COLUMN IF NOT EXISTS attachment_url TEXT;
+    ALTER TABLE messages ADD COLUMN IF NOT EXISTS attachment_name TEXT;
+    ALTER TABLE messages ADD COLUMN IF NOT EXISTS attachment_mime TEXT;
+    ALTER TABLE messages ADD COLUMN IF NOT EXISTS attachment_size INTEGER;
 
     CREATE INDEX IF NOT EXISTS messages_conversation_idx
       ON messages (conversation_id, created_at);
@@ -225,8 +244,11 @@ export async function getConversationsForUser(
 
 export async function addMessage(message: Message): Promise<void> {
   await pool.query(
-    `INSERT INTO messages (id, conversation_id, sender_id, original_text, translations, created_at)
-     VALUES ($1, $2, $3, $4, $5::jsonb, $6)`,
+    `INSERT INTO messages (
+       id, conversation_id, sender_id, original_text, translations, created_at,
+       attachment_url, attachment_name, attachment_mime, attachment_size
+     )
+     VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10)`,
     [
       message.id,
       message.conversationId,
@@ -234,6 +256,10 @@ export async function addMessage(message: Message): Promise<void> {
       message.originalText,
       JSON.stringify(message.translations),
       message.createdAt,
+      message.attachment?.url ?? null,
+      message.attachment?.name ?? null,
+      message.attachment?.mime ?? null,
+      message.attachment?.size ?? null,
     ]
   );
   await touchConversation(message.conversationId);

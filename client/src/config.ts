@@ -8,3 +8,12 @@ export function apiUrl(path: string): string {
   if (path.startsWith("http")) return path;
   return `${API_BASE}${path.startsWith("/") ? path : `/${path}`}`;
 }
+
+/** Resolve media/upload paths against the API host. */
+export function mediaUrl(path: string | undefined | null): string {
+  if (!path) return "";
+  if (path.startsWith("http") || path.startsWith("blob:") || path.startsWith("data:")) {
+    return path;
+  }
+  return apiUrl(path);
+}

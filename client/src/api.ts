@@ -21,6 +21,13 @@ export interface ConversationSummary {
   } | null;
 }
 
+export interface MessageAttachment {
+  url: string;
+  name: string;
+  mime: string;
+  size: number;
+}
+
 export interface ChatMessage {
   id: string;
   conversationId: string;
@@ -29,6 +36,7 @@ export interface ChatMessage {
   originalText: string;
   createdAt: string;
   translating?: boolean;
+  attachment?: MessageAttachment | null;
 }
 
 const TOKEN_KEY = "bridgechat_token";
@@ -97,6 +105,27 @@ export const api = {
     ),
   messages: (id: string) =>
     request<{ messages: ChatMessage[] }>(`/api/conversations/${id}/messages`),
+  uploadFile: async (file: File) => {
+    const token = getToken();
+    const body = new FormData();
+    body.append("file", file);
+    const headers: HeadersInit = {};
+    if (token) {
+      (headers as Record<string, string>)["Authorization"] = `Bearer ${token}`;
+    }
+    const res = await fetch(apiUrl("/api/upload"), {
+      method: "POST",
+      headers,
+      body,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(
+        (data as { error?: string }).error || `Upload failed (${res.status})`
+      );
+    }
+    return data as { attachment: MessageAttachment };
+  },
   getPushPublicKey: () => request<{ publicKey: string }>("/api/push/public-key"),
   subscribePush: (subscription: PushSubscriptionJSON) =>
     request<{ ok: boolean }>("/api/push/subscribe", {
