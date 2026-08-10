@@ -7,6 +7,9 @@ import { createHandlerBoundToURL } from "workbox-precaching";
 declare let self: ServiceWorkerGlobalScope;
 
 const NOTIF_ICON = "/yin-yang.png";
+const AUTH_DB = "ffc-sw-auth";
+const AUTH_STORE = "kv";
+const AUTH_KEY = "session";
 
 self.skipWaiting();
 clientsClaim();
@@ -22,6 +25,90 @@ type PushPayload = {
   messageId?: string;
 };
 
+type NotifData = {
+  conversationId: string;
+  bodies: string[];
+  count: number;
+};
+
+type SwAuthSession = {
+  token: string;
+  lang: "en" | "zh";
+  apiBase?: string;
+};
+
+async function readSwAuth(): Promise<SwAuthSession | null> {
+  try {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const req = indexedDB.open(AUTH_DB, 1);
+      req.onupgradeneeded = () => {
+        const database = req.result;
+        if (!database.objectStoreNames.contains(AUTH_STORE)) {
+          database.createObjectStore(AUTH_STORE);
+        }
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    const session = await new Promise<SwAuthSession | null>((resolve, reject) => {
+      const tx = db.transaction(AUTH_STORE, "readonly");
+      const getReq = tx.objectStore(AUTH_STORE).get(AUTH_KEY);
+      getReq.onsuccess = () =>
+        resolve((getReq.result as SwAuthSession) || null);
+      getReq.onerror = () => reject(getReq.error);
+    });
+    db.close();
+    return session;
+  } catch {
+    return null;
+  }
+}
+
+function replyLabels(lang: "en" | "zh") {
+  return lang === "zh"
+    ? { reply: "回复", placeholder: "输入回复…" }
+    : { reply: "Reply", placeholder: "Type a reply…" };
+}
+
+async function showGroupedNotification(
+  title: string,
+  body: string,
+  conversationId: string
+): Promise<void> {
+  const tag = `ffc-conv-${conversationId || "general"}`;
+  const iconUrl = new URL(NOTIF_ICON, self.location.origin).href;
+  const existing = await self.registration.getNotifications({ tag });
+  const prev = existing[0];
+  const prevData = (prev?.data || {}) as Partial<NotifData>;
+  const bodies = [...(prevData.bodies || []), body].filter(Boolean).slice(-5);
+  const count = (prevData.count || 0) + 1;
+  const displayBody =
+    count === 1 ? body : bodies.map((line) => `• ${line}`).join("\n");
+
+  const session = await readSwAuth();
+  const labels = replyLabels(session?.lang || "en");
+
+  await self.registration.showNotification(title, {
+    body: displayBody,
+    tag,
+    renotify: true,
+    icon: iconUrl,
+    data: {
+      conversationId: conversationId || "/",
+      bodies,
+      count,
+    } satisfies NotifData,
+    actions: [
+      {
+        action: "reply",
+        type: "text",
+        title: labels.reply,
+        placeholder: labels.placeholder,
+      },
+    ],
+  } as NotificationOptions);
+}
+
 self.addEventListener("push", (event) => {
   let payload: PushPayload = {};
   try {
@@ -34,9 +121,7 @@ self.addEventListener("push", (event) => {
 
   const title = payload.title || "Friends Forever Chat";
   const body = payload.body || "New message";
-  const tag = payload.messageId || payload.conversationId || "ffc-message";
   const conversationId = payload.conversationId || "";
-  const iconUrl = new URL(NOTIF_ICON, self.location.origin).href;
 
   event.waitUntil(
     (async () => {
@@ -56,43 +141,71 @@ self.addEventListener("push", (event) => {
           return false;
         }
       });
-      // App closed / backgrounded → always show. Only skip if that chat is open & focused.
       if (viewingChat) return;
 
-      // Use yin-yang as the main notification icon only.
-      // Do NOT set `badge` — Android turns badges into a white silhouette (white circle).
-      await self.registration.showNotification(title, {
-        body,
-        tag,
-        icon: iconUrl,
-        data: { conversationId: conversationId || "/" },
-      } as NotificationOptions);
+      await showGroupedNotification(title, body, conversationId);
     })()
   );
 });
 
-self.addEventListener("notificationclick", (event) => {
-  event.notification.close();
-  const conversationId = (
-    event.notification.data as { conversationId?: string } | undefined
-  )?.conversationId;
+async function sendReplyFromNotification(
+  conversationId: string,
+  text: string
+): Promise<boolean> {
+  const session = await readSwAuth();
+  if (!session?.token || !conversationId || conversationId === "/") {
+    return false;
+  }
+  const base = (session.apiBase || "").replace(/\/$/, "");
+  const url = `${base}/api/conversations/${conversationId}/messages`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${session.token}`,
+    },
+    body: JSON.stringify({ text }),
+  });
+  return res.ok;
+}
+
+async function focusOrOpenChat(conversationId: string): Promise<void> {
   const target =
     conversationId && conversationId !== "/"
       ? `/chat/${conversationId}`
       : "/";
+  const clients = await self.clients.matchAll({
+    type: "window",
+    includeUncontrolled: true,
+  });
+  for (const client of clients) {
+    if ("focus" in client) {
+      await client.focus();
+      client.postMessage({ type: "navigate", url: target });
+      return;
+    }
+  }
+  await self.clients.openWindow(target);
+}
 
-  event.waitUntil(
-    self.clients
-      .matchAll({ type: "window", includeUncontrolled: true })
-      .then((clients) => {
-        for (const client of clients) {
-          if ("focus" in client) {
-            client.focus();
-            client.postMessage({ type: "navigate", url: target });
-            return;
-          }
-        }
-        return self.clients.openWindow(target);
-      })
-  );
+self.addEventListener("notificationclick", (event) => {
+  const data = (event.notification.data || {}) as Partial<NotifData>;
+  const conversationId = data.conversationId || "/";
+  const replyText = String(
+    (event as NotificationEvent & { reply?: string }).reply || ""
+  ).trim();
+
+  if (event.action === "reply" && replyText) {
+    event.waitUntil(
+      (async () => {
+        const ok = await sendReplyFromNotification(conversationId, replyText);
+        event.notification.close();
+        if (!ok) await focusOrOpenChat(conversationId);
+      })()
+    );
+    return;
+  }
+
+  event.notification.close();
+  event.waitUntil(focusOrOpenChat(conversationId));
 });

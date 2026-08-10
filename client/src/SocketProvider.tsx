@@ -24,6 +24,12 @@ export type PresencePayload = {
   online: boolean;
 };
 
+export type MessagesSeenPayload = {
+  conversationId: string;
+  userId: string;
+  readAt: string;
+};
+
 export type SocketHandlers = {
   onMessage?: (msg: ChatMessage) => void;
   onTranslated?: (payload: {
@@ -35,6 +41,7 @@ export type SocketHandlers = {
   }) => void;
   onTyping?: (payload: TypingPayload) => void;
   onPresence?: (payload: PresencePayload) => void;
+  onMessagesSeen?: (payload: MessagesSeenPayload) => void;
   onConnect?: () => void;
   onDisconnect?: () => void;
 };
@@ -44,10 +51,12 @@ type SocketContextValue = {
   sendMessage: (
     conversationId: string,
     text: string,
-    attachment?: MessageAttachment | null
+    attachment?: MessageAttachment | null,
+    replyToId?: string | null
   ) => void;
   sendTyping: (conversationId: string, typing: boolean) => void;
   checkPresence: (userId: string) => void;
+  markRead: (conversationId: string) => void;
   subscribe: (handlers: SocketHandlers) => () => void;
 };
 
@@ -96,6 +105,9 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     socket.on("presence", (payload: PresencePayload) => {
       listenersRef.current.forEach((h) => h.onPresence?.(payload));
     });
+    socket.on("messages_seen", (payload: MessagesSeenPayload) => {
+      listenersRef.current.forEach((h) => h.onMessagesSeen?.(payload));
+    });
 
     return () => {
       socket.disconnect();
@@ -115,12 +127,14 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     (
       conversationId: string,
       text: string,
-      attachment?: MessageAttachment | null
+      attachment?: MessageAttachment | null,
+      replyToId?: string | null
     ) => {
       socketRef.current?.emit("send_message", {
         conversationId,
         text,
         attachment: attachment || null,
+        replyToId: replyToId || null,
       });
     },
     []
@@ -134,15 +148,20 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     socketRef.current?.emit("presence_check", { userId: targetUserId });
   }, []);
 
+  const markRead = useCallback((conversationId: string) => {
+    socketRef.current?.emit("mark_read", { conversationId });
+  }, []);
+
   const value = useMemo(
     () => ({
       connected,
       sendMessage,
       sendTyping,
       checkPresence,
+      markRead,
       subscribe,
     }),
-    [connected, sendMessage, sendTyping, checkPresence, subscribe]
+    [connected, sendMessage, sendTyping, checkPresence, markRead, subscribe]
   );
 
   return (

@@ -30,6 +30,8 @@ type ConversationRow = {
   participant_a: string;
   participant_b: string;
   updated_at: Date | string;
+  last_read_at_a: Date | string | null;
+  last_read_at_b: Date | string | null;
 };
 
 type MessageRow = {
@@ -43,6 +45,7 @@ type MessageRow = {
   attachment_name: string | null;
   attachment_mime: string | null;
   attachment_size: number | null;
+  reply_to_id: string | null;
 };
 
 function toIso(value: Date | string): string {
@@ -65,7 +68,19 @@ function mapConversation(row: ConversationRow): Conversation {
     id: row.id,
     participantIds: [row.participant_a, row.participant_b],
     updatedAt: toIso(row.updated_at),
+    lastReadAtA: row.last_read_at_a ? toIso(row.last_read_at_a) : null,
+    lastReadAtB: row.last_read_at_b ? toIso(row.last_read_at_b) : null,
   };
+}
+
+export function peerLastReadAt(
+  conversation: Conversation,
+  viewerId: string
+): string | null {
+  if (conversation.participantIds[0] === viewerId) {
+    return conversation.lastReadAtB;
+  }
+  return conversation.lastReadAtA;
 }
 
 function mapMessage(row: MessageRow): Message {
@@ -90,6 +105,7 @@ function mapMessage(row: MessageRow): Message {
     translations,
     createdAt: toIso(row.created_at),
     attachment,
+    replyToId: row.reply_to_id || null,
   };
 }
 
@@ -137,6 +153,11 @@ export async function initDb(): Promise<void> {
     ALTER TABLE messages ADD COLUMN IF NOT EXISTS attachment_name TEXT;
     ALTER TABLE messages ADD COLUMN IF NOT EXISTS attachment_mime TEXT;
     ALTER TABLE messages ADD COLUMN IF NOT EXISTS attachment_size INTEGER;
+
+    ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_read_at_a TIMESTAMPTZ;
+    ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_read_at_b TIMESTAMPTZ;
+
+    ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to_id UUID REFERENCES messages(id) ON DELETE SET NULL;
 
     CREATE INDEX IF NOT EXISTS messages_conversation_idx
       ON messages (conversation_id, created_at);
@@ -246,9 +267,10 @@ export async function addMessage(message: Message): Promise<void> {
   await pool.query(
     `INSERT INTO messages (
        id, conversation_id, sender_id, original_text, translations, created_at,
-       attachment_url, attachment_name, attachment_mime, attachment_size
+       attachment_url, attachment_name, attachment_mime, attachment_size,
+       reply_to_id
      )
-     VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10)`,
+     VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11)`,
     [
       message.id,
       message.conversationId,
@@ -260,6 +282,7 @@ export async function addMessage(message: Message): Promise<void> {
       message.attachment?.name ?? null,
       message.attachment?.mime ?? null,
       message.attachment?.size ?? null,
+      message.replyToId ?? null,
     ]
   );
   await touchConversation(message.conversationId);
@@ -301,6 +324,35 @@ export async function findMessageById(id: string): Promise<Message | undefined> 
     [id]
   );
   return rows[0] ? mapMessage(rows[0]) : undefined;
+}
+
+export async function findMessagesByIds(ids: string[]): Promise<Message[]> {
+  if (ids.length === 0) return [];
+  const { rows } = await pool.query<MessageRow>(
+    `SELECT * FROM messages WHERE id = ANY($1::uuid[])`,
+    [ids]
+  );
+  return rows.map(mapMessage);
+}
+
+export async function markConversationRead(
+  conversationId: string,
+  userId: string
+): Promise<string | null> {
+  const conversation = await findConversationById(conversationId);
+  if (!conversation || !conversation.participantIds.includes(userId)) {
+    return null;
+  }
+  const readAt = new Date().toISOString();
+  const column =
+    conversation.participantIds[0] === userId
+      ? "last_read_at_a"
+      : "last_read_at_b";
+  await pool.query(
+    `UPDATE conversations SET ${column} = $2::timestamptz WHERE id = $1`,
+    [conversationId, readAt]
+  );
+  return readAt;
 }
 
 export type PushSubscriptionRow = {

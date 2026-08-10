@@ -49,7 +49,7 @@ export function AuthPage() {
 
   return (
     <div className="auth-shell">
-      <BlossomScene density={32} />
+      <BlossomScene density={16} />
 
       <div className="auth-layout">
         <section className="auth-hero">

@@ -13,6 +13,8 @@ export interface Conversation {
   id: string;
   participantIds: [string, string];
   updatedAt: string;
+  lastReadAtA: string | null;
+  lastReadAtB: string | null;
 }
 
 export interface MessageAttachment {
@@ -20,6 +22,14 @@ export interface MessageAttachment {
   name: string;
   mime: string;
   size: number;
+}
+
+export interface MessageReplyPreview {
+  id: string;
+  senderId: string;
+  text: string;
+  attachmentMime?: string | null;
+  attachmentName?: string | null;
 }
 
 export interface Message {
@@ -30,6 +40,7 @@ export interface Message {
   translations: Partial<Record<Lang, string>>;
   createdAt: string;
   attachment?: MessageAttachment | null;
+  replyToId?: string | null;
 }
 
 export type PublicUser = Omit<User, "passwordHash">;
