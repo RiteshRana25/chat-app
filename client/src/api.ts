@@ -1,5 +1,6 @@
 import type { Lang } from "./i18n";
-import { apiUrl } from "./config";
+import { API_BASE, apiUrl } from "./config";
+import { saveSwAuth } from "./swAuth";
 
 export interface User {
   id: string;
@@ -45,9 +46,15 @@ export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
 }
 
-export function setToken(token: string | null): void {
+export function setToken(token: string | null, lang: Lang = "en"): void {
   if (token) localStorage.setItem(TOKEN_KEY, token);
   else localStorage.removeItem(TOKEN_KEY);
+  void saveSwAuth(token, lang, API_BASE);
+}
+
+export function syncSwAuthLang(lang: Lang): void {
+  const token = getToken();
+  if (token) void saveSwAuth(token, lang, API_BASE);
 }
 
 async function request<T>(
@@ -104,7 +111,19 @@ export const api = {
       { method: "POST", body: JSON.stringify({ email }) }
     ),
   messages: (id: string) =>
-    request<{ messages: ChatMessage[] }>(`/api/conversations/${id}/messages`),
+    request<{ messages: ChatMessage[]; peerLastReadAt: string | null }>(
+      `/api/conversations/${id}/messages`
+    ),
+  sendMessage: (id: string, text: string) =>
+    request<{ message: ChatMessage }>(`/api/conversations/${id}/messages`, {
+      method: "POST",
+      body: JSON.stringify({ text }),
+    }),
+  markRead: (id: string) =>
+    request<{ ok: boolean; readAt: string }>(
+      `/api/conversations/${id}/read`,
+      { method: "POST" }
+    ),
   uploadFile: async (file: File) => {
     const token = getToken();
     const body = new FormData();

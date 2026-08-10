@@ -1015,6 +1015,20 @@ a {
   font-variant-numeric: tabular-nums;
 }
 
+.bubble-seen {
+  display: block;
+  margin-top: 0.18rem;
+  font-size: 0.68rem;
+  line-height: 1;
+  text-align: right;
+  opacity: 0.85;
+  font-weight: 600;
+}
+
+.bubble.mine .bubble-seen {
+  color: rgba(255, 255, 255, 0.9);
+}
+
 .date-chip {
   align-self: center;
   margin: 0.35rem 0 0.15rem;
@@ -1515,6 +1529,45 @@ html[data-theme="dark"] .typing-indicator {
 .pwa-actions .btn-primary,
 .pwa-actions .ghost-btn {
   width: fit-content;
+}
+
+.pwa-install-guide {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0.9rem 1rem;
+  border-radius: 16px;
+  border: 1px solid var(--hint-border);
+  background: var(--hint-bg);
+}
+
+.pwa-install-guide h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.pwa-install-guide ol {
+  margin: 0;
+  padding-left: 1.2rem;
+  display: grid;
+  gap: 0.45rem;
+  color: var(--ink);
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.pwa-install-guide li::marker {
+  font-weight: 700;
+  color: var(--hint-ink);
+}
+
+.pwa-huawei-note {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  color: var(--hint-ink);
+  font-weight: 600;
 }
 
 @media (max-width: 860px) {

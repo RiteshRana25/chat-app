@@ -13,6 +13,8 @@ export interface Conversation {
   id: string;
   participantIds: [string, string];
   updatedAt: string;
+  lastReadAtA: string | null;
+  lastReadAtB: string | null;
 }
 
 export interface MessageAttachment {

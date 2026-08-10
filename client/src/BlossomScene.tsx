@@ -35,6 +35,9 @@ const SNOW_COLORS = [
   "#e8f1fa",
 ];
 
+const MAX_PARTICLES = 72;
+const FRAME_MS = 1000 / 28;
+
 function makeParticle(
   w: number,
   _h: number,
@@ -51,14 +54,14 @@ function makeParticle(
     return {
       x: ox + (burst ? (Math.random() - 0.5) * 140 : 0),
       y: oy,
-      size: 1.6 + Math.random() * 4.2,
-      speedY: burst ? 1.2 + Math.random() * 3.2 : 0.55 + Math.random() * 1.4,
-      speedX: burst ? (Math.random() - 0.5) * 3.2 : (Math.random() - 0.5) * 0.55,
+      size: 1.6 + Math.random() * 3.2,
+      speedY: burst ? 1.2 + Math.random() * 2.6 : 0.55 + Math.random() * 1.2,
+      speedX: burst ? (Math.random() - 0.5) * 2.6 : (Math.random() - 0.5) * 0.45,
       swing: Math.random() * Math.PI * 2,
-      swingSpeed: 0.008 + Math.random() * 0.02,
+      swingSpeed: 0.008 + Math.random() * 0.016,
       rot: Math.random() * Math.PI * 2,
-      rotSpeed: (Math.random() - 0.5) * 0.03,
-      opacity: 0.45 + Math.random() * 0.5,
+      rotSpeed: (Math.random() - 0.5) * 0.02,
+      opacity: 0.45 + Math.random() * 0.45,
       color: SNOW_COLORS[Math.floor(Math.random() * SNOW_COLORS.length)],
       kind: "snow",
     };
@@ -67,13 +70,13 @@ function makeParticle(
   return {
     x: ox + (burst ? (Math.random() - 0.5) * 120 : 0),
     y: oy,
-    size: 7 + Math.random() * 12,
-    speedY: burst ? 1 + Math.random() * 2.8 : 0.4 + Math.random() * 1,
-    speedX: burst ? (Math.random() - 0.5) * 4 : (Math.random() - 0.5) * 0.8,
+    size: 6 + Math.random() * 10,
+    speedY: burst ? 1 + Math.random() * 2.2 : 0.4 + Math.random() * 0.9,
+    speedX: burst ? (Math.random() - 0.5) * 3.2 : (Math.random() - 0.5) * 0.7,
     swing: Math.random() * Math.PI * 2,
-    swingSpeed: 0.01 + Math.random() * 0.025,
+    swingSpeed: 0.01 + Math.random() * 0.02,
     rot: Math.random() * Math.PI * 2,
-    rotSpeed: (Math.random() - 0.5) * 0.045,
+    rotSpeed: (Math.random() - 0.5) * 0.035,
     opacity: 0.55 + Math.random() * 0.4,
     color: PETAL_COLORS[Math.floor(Math.random() * PETAL_COLORS.length)],
     kind: "petal",
@@ -95,39 +98,13 @@ function drawPetal(ctx: CanvasRenderingContext2D, p: Particle) {
 }
 
 function drawSnowflake(ctx: CanvasRenderingContext2D, p: Particle) {
-  ctx.save();
-  ctx.translate(p.x, p.y);
-  ctx.rotate(p.rot);
-  ctx.globalAlpha = p.opacity;
-
-  const r = p.size;
-  const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, r * 2.4);
-  glow.addColorStop(0, "rgba(255,255,255,0.95)");
-  glow.addColorStop(0.45, p.color);
-  glow.addColorStop(1, "rgba(200,220,255,0)");
-  ctx.fillStyle = glow;
+  // Simple circle — avoid per-frame gradients (major lag source).
   ctx.beginPath();
-  ctx.arc(0, 0, r * 2.2, 0, Math.PI * 2);
+  ctx.globalAlpha = p.opacity;
+  ctx.fillStyle = p.color;
+  ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
   ctx.fill();
-
-  ctx.strokeStyle = "rgba(255,255,255,0.9)";
-  ctx.lineWidth = Math.max(0.6, r * 0.22);
-  ctx.lineCap = "round";
-  for (let i = 0; i < 3; i++) {
-    const a = (i * Math.PI) / 3;
-    ctx.beginPath();
-    ctx.moveTo(Math.cos(a) * -r, Math.sin(a) * -r);
-    ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
-    ctx.stroke();
-  }
-
-  ctx.restore();
 }
-
-type Props = {
-  density?: number;
-  className?: string;
-};
 
 const CANOPY_BLOOMS = [
   { cx: 40, cy: 36, r: 42, c: "#ffc2d1" },
@@ -176,6 +153,11 @@ const SNOW_CLOUDS = [
   { cx: 850, cy: 74, r: 30 },
 ];
 
+type Props = {
+  density?: number;
+  className?: string;
+};
+
 export function BlossomScene({ density = 36, className = "" }: Props) {
   const { t, theme } = useAuth();
   const isDark = theme === "dark";
@@ -186,22 +168,56 @@ export function BlossomScene({ density = 36, className = "" }: Props) {
   const particlesRef = useRef<Particle[]>([]);
   const sizeRef = useRef({ w: 0, h: 0 });
   const rafRef = useRef(0);
+  const lastFrameRef = useRef(0);
+  const pausedRef = useRef(false);
   const modeRef = useRef<"petal" | "snow">(mode);
   modeRef.current = mode;
 
   useEffect(() => {
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduced) {
+      pausedRef.current = true;
+    }
+
+    const updatePause = () => {
+      const active = document.activeElement;
+      const typing =
+        !!active &&
+        (active.tagName === "TEXTAREA" ||
+          active.tagName === "INPUT" ||
+          (active as HTMLElement).isContentEditable);
+      pausedRef.current =
+        reduced ||
+        document.hidden ||
+        typing ||
+        document.visibilityState === "hidden";
+    };
+
+    updatePause();
+    document.addEventListener("visibilitychange", updatePause);
+    window.addEventListener("focusin", updatePause);
+    window.addEventListener("focusout", updatePause);
+
+    return () => {
+      document.removeEventListener("visibilitychange", updatePause);
+      window.removeEventListener("focusin", updatePause);
+      window.removeEventListener("focusout", updatePause);
+    };
+  }, []);
+
+  useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext("2d");
+    const ctx = canvas.getContext("2d", { alpha: true });
     if (!ctx) return;
 
     const resize = () => {
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
       const w = window.innerWidth;
       const h = window.innerHeight;
       sizeRef.current = { w, h };
-      canvas.width = w * dpr;
-      canvas.height = h * dpr;
+      canvas.width = Math.floor(w * dpr);
+      canvas.height = Math.floor(h * dpr);
       canvas.style.width = `${w}px`;
       canvas.style.height = `${h}px`;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -216,7 +232,12 @@ export function BlossomScene({ density = 36, className = "" }: Props) {
     resize();
     window.addEventListener("resize", resize);
 
-    const tick = () => {
+    const tick = (now: number) => {
+      rafRef.current = requestAnimationFrame(tick);
+      if (pausedRef.current) return;
+      if (now - lastFrameRef.current < FRAME_MS) return;
+      lastFrameRef.current = now;
+
       const { w, h } = sizeRef.current;
       ctx.clearRect(0, 0, w, h);
       const currentMode = modeRef.current;
@@ -243,7 +264,7 @@ export function BlossomScene({ density = 36, className = "" }: Props) {
         }
       }
 
-      rafRef.current = requestAnimationFrame(tick);
+      ctx.globalAlpha = 1;
     };
 
     rafRef.current = requestAnimationFrame(tick);
@@ -262,14 +283,17 @@ export function BlossomScene({ density = 36, className = "" }: Props) {
     );
   }, [mode, density]);
 
-  function burstAt(x: number, y: number, count = 42) {
+  function burstAt(x: number, y: number, count = 14) {
     const { w, h } = sizeRef.current;
     const burst = Array.from({ length: count }, () =>
       makeParticle(w, h, modeRef.current, true, { x, y })
     );
     particlesRef.current.push(...burst);
-    if (particlesRef.current.length > 220) {
-      particlesRef.current.splice(0, particlesRef.current.length - 220);
+    if (particlesRef.current.length > MAX_PARTICLES) {
+      particlesRef.current.splice(
+        0,
+        particlesRef.current.length - MAX_PARTICLES
+      );
     }
   }
 
@@ -277,7 +301,7 @@ export function BlossomScene({ density = 36, className = "" }: Props) {
     const tree = treeRef.current;
     if (!tree) return;
     const rect = tree.getBoundingClientRect();
-    burstAt(rect.left + rect.width * 0.52, rect.top + rect.height * 0.22, 48);
+    burstAt(rect.left + rect.width * 0.52, rect.top + rect.height * 0.22, 16);
     tree.classList.remove("shake");
     void tree.offsetWidth;
     tree.classList.add("shake");
@@ -285,7 +309,7 @@ export function BlossomScene({ density = 36, className = "" }: Props) {
 
   function burstFromCanopy(e: MouseEvent<HTMLButtonElement>) {
     const canopy = canopyRef.current;
-    burstAt(e.clientX, e.clientY, 50);
+    burstAt(e.clientX, e.clientY, 16);
     if (!canopy) return;
     canopy.classList.remove("canopy-pulse");
     void canopy.offsetWidth;
@@ -376,8 +400,6 @@ export function BlossomScene({ density = 36, className = "" }: Props) {
               ry="16"
               fill="rgba(180,210,240,0.14)"
             />
-
-            {/* same thick stem as light mode */}
             <line
               x1="210"
               y1="530"
@@ -397,8 +419,6 @@ export function BlossomScene({ density = 36, className = "" }: Props) {
               strokeLinecap="round"
               opacity="0.45"
             />
-
-            {/* snow crown — same cluster layout as blossom crown */}
             <g className="bloom-cluster">
               <circle cx="210" cy="55" r="58" fill="#eef5ff" />
               <circle cx="155" cy="70" r="46" fill="#dce8f6" />
@@ -414,7 +434,6 @@ export function BlossomScene({ density = 36, className = "" }: Props) {
               <circle cx="270" cy="172" r="30" fill="#d4e3f3" />
               <circle cx="210" cy="195" r="26" fill="#e2edf8" />
             </g>
-
             <g fill="#b8cce4" opacity="0.75">
               <circle cx="210" cy="55" r="7" />
               <circle cx="155" cy="70" r="5" />
@@ -423,7 +442,6 @@ export function BlossomScene({ density = 36, className = "" }: Props) {
               <circle cx="300" cy="112" r="5" />
               <circle cx="210" cy="145" r="4.5" />
             </g>
-
             <circle cx="335" cy="48" r="26" fill="#f2f6ff" opacity="0.4" />
             <circle cx="335" cy="48" r="16" fill="#fff" opacity="0.75" />
           </svg>

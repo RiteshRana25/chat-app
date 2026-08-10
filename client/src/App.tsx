@@ -17,7 +17,7 @@ function AuthenticatedApp() {
       <MessageNotifications />
       <div className="app-with-blossom">
         <BlossomScene
-          density={theme === "dark" ? 42 : 18}
+          density={theme === "dark" ? 18 : 10}
           className="blossom-dim"
         />
         <Routes>

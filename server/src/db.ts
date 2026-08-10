@@ -30,6 +30,8 @@ type ConversationRow = {
   participant_a: string;
   participant_b: string;
   updated_at: Date | string;
+  last_read_at_a: Date | string | null;
+  last_read_at_b: Date | string | null;
 };
 
 type MessageRow = {
@@ -65,7 +67,19 @@ function mapConversation(row: ConversationRow): Conversation {
     id: row.id,
     participantIds: [row.participant_a, row.participant_b],
     updatedAt: toIso(row.updated_at),
+    lastReadAtA: row.last_read_at_a ? toIso(row.last_read_at_a) : null,
+    lastReadAtB: row.last_read_at_b ? toIso(row.last_read_at_b) : null,
   };
+}
+
+export function peerLastReadAt(
+  conversation: Conversation,
+  viewerId: string
+): string | null {
+  if (conversation.participantIds[0] === viewerId) {
+    return conversation.lastReadAtB;
+  }
+  return conversation.lastReadAtA;
 }
 
 function mapMessage(row: MessageRow): Message {
@@ -137,6 +151,9 @@ export async function initDb(): Promise<void> {
     ALTER TABLE messages ADD COLUMN IF NOT EXISTS attachment_name TEXT;
     ALTER TABLE messages ADD COLUMN IF NOT EXISTS attachment_mime TEXT;
     ALTER TABLE messages ADD COLUMN IF NOT EXISTS attachment_size INTEGER;
+
+    ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_read_at_a TIMESTAMPTZ;
+    ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_read_at_b TIMESTAMPTZ;
 
     CREATE INDEX IF NOT EXISTS messages_conversation_idx
       ON messages (conversation_id, created_at);
@@ -301,6 +318,26 @@ export async function findMessageById(id: string): Promise<Message | undefined> 
     [id]
   );
   return rows[0] ? mapMessage(rows[0]) : undefined;
+}
+
+export async function markConversationRead(
+  conversationId: string,
+  userId: string
+): Promise<string | null> {
+  const conversation = await findConversationById(conversationId);
+  if (!conversation || !conversation.participantIds.includes(userId)) {
+    return null;
+  }
+  const readAt = new Date().toISOString();
+  const column =
+    conversation.participantIds[0] === userId
+      ? "last_read_at_a"
+      : "last_read_at_b";
+  await pool.query(
+    `UPDATE conversations SET ${column} = $2::timestamptz WHERE id = $1`,
+    [conversationId, readAt]
+  );
+  return readAt;
 }
 
 export type PushSubscriptionRow = {

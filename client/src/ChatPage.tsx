@@ -51,6 +51,7 @@ export function ChatPage() {
   const [peekId, setPeekId] = useState<string | null>(null);
   const [otherTyping, setOtherTyping] = useState(false);
   const [viewer, setViewer] = useState<MessageAttachment | null>(null);
+  const [peerLastReadAt, setPeerLastReadAt] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -71,10 +72,12 @@ export function ChatPage() {
     if (!id) return;
     setOtherTyping(false);
     setOtherOnline(false);
+    setPeerLastReadAt(null);
     clearPending();
     Promise.all([api.messages(id), api.conversations()]).then(
       ([msgRes, convRes]) => {
         setMessages(msgRes.messages);
+        setPeerLastReadAt(msgRes.peerLastReadAt ?? null);
         const conv = convRes.conversations.find((c) => c.id === id);
         setOther(conv?.otherUser ?? null);
       }
@@ -104,55 +107,79 @@ export function ChatPage() {
     };
   }, [id]);
 
-  const { sendMessage, sendTyping, checkPresence, connected } = useSocket({
-    onMessage: (msg) => {
-      if (msg.conversationId !== id) return;
-      if (msg.senderId !== user?.id) setOtherTyping(false);
-      setMessages((prev) => {
-        if (prev.some((m) => m.id === msg.id)) return prev;
-        return [...prev, msg];
-      });
-    },
-    onTranslated: (payload) => {
-      if (payload.conversationId !== id) return;
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === payload.id
-            ? {
-                ...m,
-                text: payload.text,
-                originalText: payload.originalText,
-                translating: false,
-              }
-            : m
-        )
-      );
-    },
-    onTyping: (payload) => {
-      if (payload.conversationId !== id) return;
-      if (payload.userId === user?.id) return;
-      if (otherTypingTimeoutRef.current) {
-        clearTimeout(otherTypingTimeoutRef.current);
-        otherTypingTimeoutRef.current = null;
-      }
-      setOtherTyping(payload.typing);
-      if (payload.typing) {
-        otherTypingTimeoutRef.current = setTimeout(() => {
-          setOtherTyping(false);
-        }, 5000);
-      }
-    },
-    onPresence: (payload) => {
-      if (!otherIdRef.current || payload.userId !== otherIdRef.current) return;
-      setOtherOnline(payload.online);
-      if (!payload.online) setOtherTyping(false);
-    },
-  });
+  const { sendMessage, sendTyping, checkPresence, markRead, connected } =
+    useSocket({
+      onMessage: (msg) => {
+        if (msg.conversationId !== id) return;
+        if (msg.senderId !== user?.id) setOtherTyping(false);
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === msg.id)) return prev;
+          return [...prev, msg];
+        });
+      },
+      onTranslated: (payload) => {
+        if (payload.conversationId !== id) return;
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === payload.id
+              ? {
+                  ...m,
+                  text: payload.text,
+                  originalText: payload.originalText,
+                  translating: false,
+                }
+              : m
+          )
+        );
+      },
+      onTyping: (payload) => {
+        if (payload.conversationId !== id) return;
+        if (payload.userId === user?.id) return;
+        if (otherTypingTimeoutRef.current) {
+          clearTimeout(otherTypingTimeoutRef.current);
+          otherTypingTimeoutRef.current = null;
+        }
+        setOtherTyping(payload.typing);
+        if (payload.typing) {
+          otherTypingTimeoutRef.current = setTimeout(() => {
+            setOtherTyping(false);
+          }, 5000);
+        }
+      },
+      onPresence: (payload) => {
+        if (!otherIdRef.current || payload.userId !== otherIdRef.current) return;
+        setOtherOnline(payload.online);
+        if (!payload.online) setOtherTyping(false);
+      },
+      onMessagesSeen: (payload) => {
+        if (payload.conversationId !== id) return;
+        if (payload.userId === user?.id) return;
+        setPeerLastReadAt(payload.readAt);
+      },
+    });
 
   useEffect(() => {
     if (!other?.id || !connected) return;
     checkPresence(other.id);
   }, [other?.id, connected, checkPresence]);
+
+  useEffect(() => {
+    if (!id || !connected || !user) return;
+
+    const mark = () => {
+      if (document.visibilityState === "visible") {
+        markRead(id);
+      }
+    };
+
+    mark();
+    window.addEventListener("focus", mark);
+    document.addEventListener("visibilitychange", mark);
+    return () => {
+      window.removeEventListener("focus", mark);
+      document.removeEventListener("visibilitychange", mark);
+    };
+  }, [id, connected, user?.id, markRead, messages.length]);
 
   sendTypingRef.current = sendTyping;
 
@@ -248,6 +275,17 @@ export function ChatPage() {
   }
 
   const canSend = (!!text.trim() || !!pending) && !uploading;
+
+  const lastSeenMineId = (() => {
+    if (!peerLastReadAt || !user) return null;
+    const readMs = new Date(peerLastReadAt).getTime();
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.senderId !== user.id) continue;
+      if (new Date(m.createdAt).getTime() <= readMs) return m.id;
+    }
+    return null;
+  })();
 
   return (
     <div className="app-shell chat-shell">
@@ -385,6 +423,9 @@ export function ChatPage() {
                 <span className="bubble-time">
                   {formatMessageTime(m.createdAt, lang)}
                 </span>
+                {mine && m.id === lastSeenMineId && (
+                  <span className="bubble-seen">{t.seen}</span>
+                )}
               </div>
             </Fragment>
           );

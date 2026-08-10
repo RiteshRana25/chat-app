@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { api, getToken, setToken, type User } from "./api";
+import { api, getToken, setToken, syncSwAuthLang, type User } from "./api";
 import { dictionaries, type Dict, type Lang } from "./i18n";
 
 export type Theme = "light" | "dark";
@@ -79,6 +79,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .then(({ user }) => {
         setUser(user);
         setUiLang(user.language);
+        syncSwAuthLang(user.language);
       })
       .catch(() => setToken(null))
       .finally(() => setLoading(false));
@@ -86,7 +87,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(async (email: string, password: string) => {
     const { token, user } = await api.login({ email, password });
-    setToken(token);
+    setToken(token, user.language);
     setUser(user);
     setUiLang(user.language);
   }, []);
@@ -104,7 +105,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         displayName,
         language,
       });
-      setToken(token);
+      setToken(token, user.language);
       setUser(user);
       setUiLang(user.language);
     },
@@ -120,12 +121,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { user } = await api.setLanguage(language);
     setUser(user);
     setUiLang(user.language);
+    syncSwAuthLang(user.language);
   }, []);
 
   const refreshUser = useCallback(async () => {
     const { user } = await api.me();
     setUser(user);
     setUiLang(user.language);
+    syncSwAuthLang(user.language);
   }, []);
 
   const value = useMemo(

@@ -18,6 +18,8 @@ import {
   getMessages,
   getPushSubscriptionsForUser,
   initDb,
+  markConversationRead,
+  peerLastReadAt,
   removePushSubscription,
   updateMessage,
   updateUser,
@@ -348,6 +350,8 @@ app.post("/api/conversations", authMiddleware, async (req, res) => {
       id: randomUUID(),
       participantIds: [userId, other.id],
       updatedAt: new Date().toISOString(),
+      lastReadAtA: null,
+      lastReadAtB: null,
     };
     await addConversation(conversation);
   }
@@ -384,7 +388,53 @@ app.get("/api/conversations/:id/messages", authMiddleware, async (req, res) => {
         detectLang(m.originalText) !== me.language
     )
   );
-  res.json({ messages });
+  res.json({
+    messages,
+    peerLastReadAt: peerLastReadAt(conversation, userId),
+  });
+});
+
+app.post("/api/conversations/:id/read", authMiddleware, async (req, res) => {
+  const userId = (req as express.Request & { userId: string }).userId;
+  const conversationId = String(req.params.id);
+  const conversation = await findConversationById(conversationId);
+  if (!conversation || !conversation.participantIds.includes(userId)) {
+    res.status(404).json({ error: "Conversation not found" });
+    return;
+  }
+  const readAt = await markConversationRead(conversationId, userId);
+  if (!readAt) {
+    res.status(404).json({ error: "Conversation not found" });
+    return;
+  }
+  const otherId = conversation.participantIds.find((id) => id !== userId)!;
+  io.to(`user:${otherId}`).emit("messages_seen", {
+    conversationId,
+    userId,
+    readAt,
+  });
+  res.json({ ok: true, readAt });
+});
+
+app.post("/api/conversations/:id/messages", authMiddleware, async (req, res) => {
+  const userId = (req as express.Request & { userId: string }).userId;
+  const conversationId = String(req.params.id);
+  const text = String((req.body as { text?: string })?.text || "").trim();
+  if (!text) {
+    res.status(400).json({ error: "Message text required" });
+    return;
+  }
+  try {
+    const result = await deliverChatMessage(userId, conversationId, text, null);
+    if (!result) {
+      res.status(404).json({ error: "Conversation not found" });
+      return;
+    }
+    res.json({ message: result.senderView });
+  } catch (err) {
+    console.error("REST send message failed:", err);
+    res.status(500).json({ error: "Failed to send message" });
+  }
 });
 
 app.post("/api/upload", authMiddleware, (req, res) => {
@@ -496,6 +546,87 @@ async function pushToUser(userId: string, payload: PushPayload): Promise<void> {
   }
 }
 
+async function deliverChatMessage(
+  userId: string,
+  conversationId: string,
+  text: string,
+  attachment: MessageAttachment | null
+): Promise<{ senderView: ReturnType<typeof toClientMessage> } | null> {
+  if ((!text && !attachment) || !conversationId) return null;
+  if (
+    attachment &&
+    (!attachment.url || !attachment.name || !attachment.mime)
+  ) {
+    return null;
+  }
+
+  const conversation = await findConversationById(conversationId);
+  if (!conversation || !conversation.participantIds.includes(userId)) {
+    return null;
+  }
+
+  const sender = await findUserById(userId);
+  if (!sender) return null;
+
+  const otherId = conversation.participantIds.find((id) => id !== userId)!;
+  const other = await findUserById(otherId);
+  if (!other) return null;
+
+  const sourceLang = text ? detectLang(text) : other.language;
+  const message: Message = {
+    id: randomUUID(),
+    conversationId,
+    senderId: userId,
+    originalText: text,
+    translations: text ? { [sourceLang]: text } : {},
+    createdAt: new Date().toISOString(),
+    attachment,
+  };
+  await addMessage(message);
+
+  const senderView = toClientMessage(message, sender.language, userId, false);
+  io.to(`user:${userId}`).emit("message", senderView);
+
+  const needsTranslate = !!text && sourceLang !== other.language;
+  io.to(`user:${otherId}`).emit(
+    "message",
+    toClientMessage(message, other.language, otherId, needsTranslate)
+  );
+
+  let recipientText = text;
+  if (needsTranslate) {
+    const translated = await translateText(text, other.language, sourceLang);
+    message.translations[other.language] = translated;
+    await updateMessage(message);
+    recipientText = translated;
+
+    io.to(`user:${otherId}`).emit("message_translated", {
+      id: message.id,
+      conversationId: message.conversationId,
+      text: translated,
+      originalText: message.originalText,
+      translating: false,
+    });
+  }
+
+  const pushBody =
+    recipientText ||
+    (attachment?.mime.startsWith("image/")
+      ? "📷 Photo"
+      : attachment?.mime.startsWith("video/")
+        ? "🎬 Video"
+        : `📎 ${attachment?.name || "File"}`);
+
+  await pushToUser(otherId, {
+    title: sender.displayName,
+    body: pushBody,
+    conversationId,
+    messageId: message.id,
+  });
+
+  return { senderView };
+}
+
 io.use((socket, next) => {
   const token = socket.handshake.auth?.token as string | undefined;
   if (!token) return next(new Error("Unauthorized"));
@@ -537,82 +668,32 @@ io.on("connection", (socket) => {
       const text = payload?.text?.trim() || "";
       const conversationId = payload?.conversationId;
       const attachment = payload?.attachment ?? null;
-      if ((!text && !attachment) || !conversationId) return;
-      if (
-        attachment &&
-        (!attachment.url || !attachment.name || !attachment.mime)
-      ) {
-        return;
+      if (!conversationId) return;
+      try {
+        await deliverChatMessage(userId, conversationId, text, attachment);
+      } catch (err) {
+        console.error("send_message failed:", err);
       }
-
-      const conversation = await findConversationById(conversationId);
-      if (!conversation || !conversation.participantIds.includes(userId)) {
-        return;
-      }
-
-      const sender = await findUserById(userId);
-      if (!sender) return;
-
-      const otherId = conversation.participantIds.find((id) => id !== userId)!;
-      const other = await findUserById(otherId);
-      if (!other) return;
-
-      const sourceLang = text ? detectLang(text) : other.language;
-      const message: Message = {
-        id: randomUUID(),
-        conversationId,
-        senderId: userId,
-        originalText: text,
-        translations: text ? { [sourceLang]: text } : {},
-        createdAt: new Date().toISOString(),
-        attachment,
-      };
-      await addMessage(message);
-
-      io.to(`user:${userId}`).emit(
-        "message",
-        toClientMessage(message, sender.language, userId, false)
-      );
-
-      const needsTranslate =
-        !!text && sourceLang !== other.language;
-      io.to(`user:${otherId}`).emit(
-        "message",
-        toClientMessage(message, other.language, otherId, needsTranslate)
-      );
-
-      let recipientText = text;
-      if (needsTranslate) {
-        const translated = await translateText(text, other.language, sourceLang);
-        message.translations[other.language] = translated;
-        await updateMessage(message);
-        recipientText = translated;
-
-        io.to(`user:${otherId}`).emit("message_translated", {
-          id: message.id,
-          conversationId: message.conversationId,
-          text: translated,
-          originalText: message.originalText,
-          translating: false,
-        });
-      }
-
-      const pushBody =
-        recipientText ||
-        (attachment?.mime.startsWith("image/")
-          ? "📷 Photo"
-          : attachment?.mime.startsWith("video/")
-            ? "🎬 Video"
-            : `📎 ${attachment?.name || "File"}`);
-
-      await pushToUser(otherId, {
-        title: sender.displayName,
-        body: pushBody,
-        conversationId,
-        messageId: message.id,
-      });
     }
   );
+
+  socket.on("mark_read", async (payload: { conversationId?: string }) => {
+    const conversationId = payload?.conversationId;
+    if (!conversationId) return;
+    const conversation = await findConversationById(conversationId);
+    if (!conversation || !conversation.participantIds.includes(userId)) {
+      return;
+    }
+    const readAt = await markConversationRead(conversationId, userId);
+    if (!readAt) return;
+    const otherId = conversation.participantIds.find((id) => id !== userId);
+    if (!otherId) return;
+    io.to(`user:${otherId}`).emit("messages_seen", {
+      conversationId,
+      userId,
+      readAt,
+    });
+  });
 
   socket.on(
     "typing",

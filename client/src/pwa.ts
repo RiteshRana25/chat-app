@@ -137,25 +137,45 @@ export async function showMessageNotification(
   title: string,
   body: string,
   conversationId: string,
-  messageId: string
+  _messageId: string
 ): Promise<void> {
   if (Notification.permission !== "granted") return;
 
+  const tag = `ffc-conv-${conversationId || "general"}`;
   const reg = await navigator.serviceWorker.getRegistration();
   if (reg) {
-    // No `badge` — Android renders badges as a white silhouette (white circle).
+    const existing = await reg.getNotifications({ tag });
+    const prev = existing[0];
+    const prevData = (prev?.data || {}) as {
+      bodies?: string[];
+      count?: number;
+    };
+    const bodies = [...(prevData.bodies || []), body].filter(Boolean).slice(-5);
+    const count = (prevData.count || 0) + 1;
+    const displayBody =
+      count === 1 ? body : bodies.map((line) => `• ${line}`).join("\n");
+
     await reg.showNotification(title, {
-      body,
-      tag: messageId,
+      body: displayBody,
+      tag,
+      renotify: true,
       icon: NOTIF_ICON,
-      data: { conversationId },
-    });
+      data: { conversationId, bodies, count },
+      actions: [
+        {
+          action: "reply",
+          type: "text",
+          title: "Reply",
+          placeholder: "Type a reply…",
+        },
+      ],
+    } as NotificationOptions);
     return;
   }
 
   new Notification(title, {
     body,
-    tag: messageId,
+    tag,
     icon: NOTIF_ICON,
   });
 }
