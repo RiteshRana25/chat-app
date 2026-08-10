@@ -29,6 +29,14 @@ export interface MessageAttachment {
   size: number;
 }
 
+export interface MessageReplyTo {
+  id: string;
+  senderId: string;
+  text: string;
+  attachmentMime?: string | null;
+  attachmentName?: string | null;
+}
+
 export interface ChatMessage {
   id: string;
   conversationId: string;
@@ -38,6 +46,7 @@ export interface ChatMessage {
   createdAt: string;
   translating?: boolean;
   attachment?: MessageAttachment | null;
+  replyTo?: MessageReplyTo | null;
 }
 
 const TOKEN_KEY = "bridgechat_token";

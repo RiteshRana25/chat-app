@@ -24,6 +24,14 @@ export interface MessageAttachment {
   size: number;
 }
 
+export interface MessageReplyPreview {
+  id: string;
+  senderId: string;
+  text: string;
+  attachmentMime?: string | null;
+  attachmentName?: string | null;
+}
+
 export interface Message {
   id: string;
   conversationId: string;
@@ -32,6 +40,7 @@ export interface Message {
   translations: Partial<Record<Lang, string>>;
   createdAt: string;
   attachment?: MessageAttachment | null;
+  replyToId?: string | null;
 }
 
 export type PublicUser = Omit<User, "passwordHash">;

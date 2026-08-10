@@ -988,6 +988,45 @@ a {
   height: 0;
 }
 
+.bubble-row {
+  position: relative;
+  display: flex;
+  width: 100%;
+  touch-action: pan-y;
+}
+
+.bubble-row.mine {
+  justify-content: flex-end;
+}
+
+.bubble-row.theirs {
+  justify-content: flex-start;
+}
+
+.bubble-reply-hint {
+  position: absolute;
+  left: 0.1rem;
+  top: 50%;
+  transform: translateY(-50%) scale(0.7);
+  width: 1.7rem;
+  height: 1.7rem;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: rgba(37, 211, 102, 0.18);
+  color: #128c7e;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease, transform 0.12s ease;
+  font-size: 0.95rem;
+  z-index: 1;
+}
+
+.bubble-reply-hint.show {
+  opacity: 1;
+  transform: translateY(-50%) scale(1);
+}
+
 .bubble {
   max-width: min(78%, 440px);
   border: 0;
@@ -996,6 +1035,213 @@ a {
   text-align: left;
   animation: rise 0.35s var(--ease);
   cursor: pointer;
+  position: relative;
+  transition: transform 0.05s linear, box-shadow 0.25s ease;
+  will-change: transform;
+  user-select: none;
+}
+
+.bubble-flash {
+  animation: bubble-flash 1.35s ease;
+}
+
+@keyframes bubble-flash {
+  0%,
+  100% {
+    filter: none;
+  }
+  35% {
+    filter: drop-shadow(0 0 0.35rem rgba(37, 211, 102, 0.85));
+  }
+}
+
+.bubble-quote {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  width: 100%;
+  margin: 0 0 0.45rem;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.08);
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  overflow: hidden;
+}
+
+.bubble.mine .bubble-quote {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.bubble-quote-accent {
+  width: 4px;
+  flex-shrink: 0;
+  background: #25d366;
+}
+
+.bubble.mine .bubble-quote-accent {
+  background: rgba(255, 255, 255, 0.85);
+}
+
+.bubble-quote-copy {
+  min-width: 0;
+  flex: 1;
+  display: grid;
+  gap: 0.1rem;
+  padding: 0.4rem 0.55rem;
+}
+
+.bubble-quote-copy strong {
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: #128c7e;
+}
+
+.bubble.mine .bubble-quote-copy strong {
+  color: #dff8e8;
+}
+
+.bubble-quote-copy span {
+  font-size: 0.8rem;
+  line-height: 1.35;
+  opacity: 0.9;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.bubble-meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.35rem;
+  margin-top: 0.28rem;
+}
+
+.bubble-reply-btn {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  opacity: 0.4;
+  cursor: pointer;
+  font-size: 0.85rem;
+  line-height: 1;
+  padding: 0.1rem 0.15rem;
+}
+
+.bubble-row:hover .bubble-reply-btn,
+.bubble-reply-btn:focus-visible {
+  opacity: 0.95;
+}
+
+.reply-dock {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  margin: 0;
+  padding: 0.5rem 2.45rem 0.45rem 0.55rem;
+  border-radius: 18px 18px 0 0;
+  background: var(--glass);
+  border: 1px solid var(--panel-border);
+  border-bottom: 0;
+  box-shadow: 0 -6px 20px rgba(16, 36, 31, 0.05);
+}
+
+.chat-shell:has(.reply-dock) .composer.panel {
+  margin-top: 0;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  border-top: 0;
+}
+
+.reply-preview {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  min-width: 0;
+  flex: 1;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: #f0f2f5;
+  overflow: hidden;
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+}
+
+.reply-preview-accent {
+  width: 4px;
+  flex-shrink: 0;
+  background: #25d366;
+}
+
+.reply-preview-copy {
+  min-width: 0;
+  flex: 1;
+  display: grid;
+  gap: 0.12rem;
+  padding: 0.45rem 0.6rem;
+  align-content: center;
+}
+
+.reply-preview-copy strong {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #128c7e;
+}
+
+.reply-preview-snippet {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-width: 0;
+  font-size: 0.84rem;
+  line-height: 1.3;
+  color: #667781;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.reply-media-icon {
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
+.reply-preview-thumb {
+  width: 3.25rem;
+  height: 3.25rem;
+  object-fit: cover;
+  flex-shrink: 0;
+  background: #ddd;
+}
+
+.reply-preview-close {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.4rem;
+  width: 1.55rem;
+  height: 1.55rem;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(17, 27, 33, 0.18);
+  color: #111b21;
+  font-size: 1.05rem;
+  line-height: 1;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  z-index: 1;
+}
+
+.reply-preview-close:hover {
+  background: rgba(17, 27, 33, 0.28);
 }
 
 .bubble p {
@@ -1007,7 +1253,7 @@ a {
 
 .bubble-time {
   display: block;
-  margin-top: 0.28rem;
+  margin-top: 0;
   font-size: 0.68rem;
   line-height: 1;
   opacity: 0.72;
@@ -1891,7 +2137,32 @@ html[data-theme="dark"] .avatar {
   color: #fff;
 }
 
-html[data-theme="dark"] .blossom-tree {
+html[data-theme="dark"] .reply-dock {
+  background: rgba(24, 38, 58, 0.96);
+  border-color: var(--line);
+}
+
+html[data-theme="dark"] .reply-preview {
+  background: #1a2940;
+}
+
+html[data-theme="dark"] .reply-preview-copy strong {
+  color: #7ddea8;
+}
+
+html[data-theme="dark"] .reply-preview-snippet {
+  color: #a8b8cc;
+}
+
+html[data-theme="dark"] .reply-preview-close {
+  background: rgba(255, 255, 255, 0.16);
+  color: #f4f7fc;
+}
+
+html[data-theme="dark"] .bubble-reply-hint {
+  background: rgba(125, 222, 168, 0.18);
+  color: #7ddea8;
+}
   filter: drop-shadow(0 18px 30px rgba(80, 130, 190, 0.28));
   opacity: 0.88;
 }

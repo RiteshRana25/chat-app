@@ -14,6 +14,8 @@ import {
   findConversationById,
   findUserByEmail,
   findUserById,
+  findMessageById,
+  findMessagesByIds,
   getConversationsForUser,
   getMessages,
   getPushSubscriptionsForUser,
@@ -27,7 +29,7 @@ import {
 } from "./db.js";
 import { getVapidPublicKey, initPush, sendPush, type PushPayload } from "./push.js";
 import { detectLang, translateText } from "./translate.js";
-import type { Lang, Message, MessageAttachment, PublicUser } from "./types.js";
+import type { Lang, Message, MessageAttachment, MessageReplyPreview, PublicUser } from "./types.js";
 import { upload, uploadBufferToCloudinary, isCloudinaryConfigured } from "./upload.js";
 
 const PORT = Number(process.env.PORT) || 3001;
@@ -178,7 +180,8 @@ function toClientMessage(
   message: Message,
   viewerLang: Lang,
   viewerId: string,
-  translating = false
+  translating = false,
+  replyTo: MessageReplyPreview | null = null
 ) {
   return {
     id: message.id,
@@ -189,7 +192,69 @@ function toClientMessage(
     createdAt: message.createdAt,
     translating,
     attachment: message.attachment ?? null,
+    replyTo,
   };
+}
+
+function truncatePreview(text: string, max = 90): string {
+  const t = text.trim();
+  if (t.length <= max) return t;
+  return `${t.slice(0, max - 1)}…`;
+}
+
+function replyPreviewFromMessage(
+  target: Message,
+  viewerLang: Lang,
+  viewerId: string
+): MessageReplyPreview {
+  return {
+    id: target.id,
+    senderId: target.senderId,
+    text: truncatePreview(previewText(target, viewerLang, viewerId)),
+    attachmentMime: target.attachment?.mime ?? null,
+    attachmentName: target.attachment?.name ?? null,
+  };
+}
+
+async function resolveReplyPreview(
+  replyToId: string | null | undefined,
+  conversationId: string,
+  viewerLang: Lang,
+  viewerId: string
+): Promise<MessageReplyPreview | null> {
+  if (!replyToId) return null;
+  const target = await findMessageById(replyToId);
+  if (!target || target.conversationId !== conversationId) return null;
+  return replyPreviewFromMessage(target, viewerLang, viewerId);
+}
+
+async function attachReplyPreviews(
+  messages: Message[],
+  viewerLang: Lang,
+  viewerId: string
+) {
+  const replyIds = [
+    ...new Set(
+      messages
+        .map((m) => m.replyToId)
+        .filter((id): id is string => !!id)
+    ),
+  ];
+  const replied = await findMessagesByIds(replyIds);
+  const byId = new Map(replied.map((m) => [m.id, m]));
+  return messages.map((m) => {
+    const target = m.replyToId ? byId.get(m.replyToId) : undefined;
+    const replyTo =
+      target && target.conversationId === m.conversationId
+        ? replyPreviewFromMessage(target, viewerLang, viewerId)
+        : null;
+    const translating =
+      m.senderId !== viewerId &&
+      !!m.originalText.trim() &&
+      !m.translations[viewerLang] &&
+      detectLang(m.originalText) !== viewerLang;
+    return toClientMessage(m, viewerLang, viewerId, translating, replyTo);
+  });
 }
 
 app.get("/api/health", (_req, res) => {
@@ -377,16 +442,10 @@ app.get("/api/conversations/:id/messages", authMiddleware, async (req, res) => {
     res.status(404).json({ error: "User not found" });
     return;
   }
-  const messages = (await getMessages(conversation.id)).map((m) =>
-    toClientMessage(
-      m,
-      me.language,
-      userId,
-      m.senderId !== userId &&
-        !!m.originalText.trim() &&
-        !m.translations[me.language] &&
-        detectLang(m.originalText) !== me.language
-    )
+  const messages = await attachReplyPreviews(
+    await getMessages(conversation.id),
+    me.language,
+    userId
   );
   res.json({
     messages,
@@ -419,13 +478,21 @@ app.post("/api/conversations/:id/read", authMiddleware, async (req, res) => {
 app.post("/api/conversations/:id/messages", authMiddleware, async (req, res) => {
   const userId = (req as express.Request & { userId: string }).userId;
   const conversationId = String(req.params.id);
-  const text = String((req.body as { text?: string })?.text || "").trim();
+  const body = req.body as { text?: string; replyToId?: string | null };
+  const text = String(body?.text || "").trim();
+  const replyToId = body?.replyToId || null;
   if (!text) {
     res.status(400).json({ error: "Message text required" });
     return;
   }
   try {
-    const result = await deliverChatMessage(userId, conversationId, text, null);
+    const result = await deliverChatMessage(
+      userId,
+      conversationId,
+      text,
+      null,
+      replyToId
+    );
     if (!result) {
       res.status(404).json({ error: "Conversation not found" });
       return;
@@ -550,7 +617,8 @@ async function deliverChatMessage(
   userId: string,
   conversationId: string,
   text: string,
-  attachment: MessageAttachment | null
+  attachment: MessageAttachment | null,
+  replyToId: string | null = null
 ): Promise<{ senderView: ReturnType<typeof toClientMessage> } | null> {
   if ((!text && !attachment) || !conversationId) return null;
   if (
@@ -572,6 +640,14 @@ async function deliverChatMessage(
   const other = await findUserById(otherId);
   if (!other) return null;
 
+  let validReplyToId: string | null = null;
+  if (replyToId) {
+    const target = await findMessageById(replyToId);
+    if (target && target.conversationId === conversationId) {
+      validReplyToId = target.id;
+    }
+  }
+
   const sourceLang = text ? detectLang(text) : other.language;
   const message: Message = {
     id: randomUUID(),
@@ -581,16 +657,42 @@ async function deliverChatMessage(
     translations: text ? { [sourceLang]: text } : {},
     createdAt: new Date().toISOString(),
     attachment,
+    replyToId: validReplyToId,
   };
   await addMessage(message);
 
-  const senderView = toClientMessage(message, sender.language, userId, false);
+  const senderReply = await resolveReplyPreview(
+    validReplyToId,
+    conversationId,
+    sender.language,
+    userId
+  );
+  const otherReply = await resolveReplyPreview(
+    validReplyToId,
+    conversationId,
+    other.language,
+    otherId
+  );
+
+  const senderView = toClientMessage(
+    message,
+    sender.language,
+    userId,
+    false,
+    senderReply
+  );
   io.to(`user:${userId}`).emit("message", senderView);
 
   const needsTranslate = !!text && sourceLang !== other.language;
   io.to(`user:${otherId}`).emit(
     "message",
-    toClientMessage(message, other.language, otherId, needsTranslate)
+    toClientMessage(
+      message,
+      other.language,
+      otherId,
+      needsTranslate,
+      otherReply
+    )
   );
 
   let recipientText = text;
@@ -664,13 +766,21 @@ io.on("connection", (socket) => {
       conversationId: string;
       text?: string;
       attachment?: MessageAttachment | null;
+      replyToId?: string | null;
     }) => {
       const text = payload?.text?.trim() || "";
       const conversationId = payload?.conversationId;
       const attachment = payload?.attachment ?? null;
+      const replyToId = payload?.replyToId || null;
       if (!conversationId) return;
       try {
-        await deliverChatMessage(userId, conversationId, text, attachment);
+        await deliverChatMessage(
+          userId,
+          conversationId,
+          text,
+          attachment,
+          replyToId
+        );
       } catch (err) {
         console.error("send_message failed:", err);
       }

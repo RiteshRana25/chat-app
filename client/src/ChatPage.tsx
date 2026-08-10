@@ -5,9 +5,15 @@ import {
   useState,
   type FormEvent,
   type KeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
 } from "react";
 import { Link, useParams } from "react-router-dom";
-import { api, type ChatMessage, type MessageAttachment, type User } from "./api";
+import {
+  api,
+  type ChatMessage,
+  type MessageAttachment,
+  type User,
+} from "./api";
 import { useAuth } from "./AuthContext";
 import { mediaUrl } from "./config";
 import { MediaViewer } from "./MediaViewer";
@@ -24,6 +30,9 @@ type PendingFile = {
   previewUrl: string;
 };
 
+const SWIPE_TRIGGER = 56;
+const SWIPE_MAX = 72;
+
 function formatBytes(size: number): string {
   if (size < 1024) return `${size} B`;
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
@@ -36,6 +45,15 @@ function isImageMime(mime: string): boolean {
 
 function isVideoMime(mime: string): boolean {
   return mime.startsWith("video/");
+}
+
+function quoteLabel(m: ChatMessage, photo: string, video: string, file: string): string {
+  if (m.text?.trim()) return m.text;
+  const mime = m.attachment?.mime || "";
+  if (isImageMime(mime)) return photo;
+  if (isVideoMime(mime)) return video;
+  if (m.attachment) return m.attachment.name || file;
+  return "";
 }
 
 export function ChatPage() {
@@ -52,9 +70,15 @@ export function ChatPage() {
   const [otherTyping, setOtherTyping] = useState(false);
   const [viewer, setViewer] = useState<MessageAttachment | null>(null);
   const [peerLastReadAt, setPeerLastReadAt] = useState<string | null>(null);
+  const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+  const [swipeUi, setSwipeUi] = useState<{ id: string; dx: number } | null>(
+    null
+  );
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const streamRef = useRef<HTMLDivElement>(null);
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const otherTypingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null
@@ -65,6 +89,14 @@ export function ChatPage() {
   const sendTypingRef = useRef<(conversationId: string, typing: boolean) => void>(
     () => {}
   );
+  const swipeRef = useRef<{
+    id: string;
+    startX: number;
+    startY: number;
+    dx: number;
+    locked: boolean | null;
+    moved: boolean;
+  } | null>(null);
 
   otherIdRef.current = other?.id ?? null;
 
@@ -73,6 +105,9 @@ export function ChatPage() {
     setOtherTyping(false);
     setOtherOnline(false);
     setPeerLastReadAt(null);
+    setReplyTo(null);
+    setHighlightId(null);
+    setSwipeUi(null);
     clearPending();
     Promise.all([api.messages(id), api.conversations()]).then(
       ([msgRes, convRes]) => {
@@ -255,8 +290,9 @@ export function ChatPage() {
       setUploading(false);
     }
 
-    sendMessage(id, caption, attachment);
+    sendMessage(id, caption, attachment, replyTo?.id ?? null);
     setText("");
+    setReplyTo(null);
     clearPending();
   }
 
@@ -286,6 +322,82 @@ export function ChatPage() {
     }
     return null;
   })();
+
+  function beginReply(message: ChatMessage) {
+    setReplyTo(message);
+    window.setTimeout(() => inputRef.current?.focus(), 0);
+  }
+
+  function scrollToQuoted(messageId: string) {
+    const el = document.getElementById(`msg-${messageId}`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    setHighlightId(messageId);
+    window.setTimeout(() => {
+      setHighlightId((cur) => (cur === messageId ? null : cur));
+    }, 1500);
+  }
+
+  function onBubblePointerDown(
+    e: ReactPointerEvent<HTMLDivElement>,
+    message: ChatMessage
+  ) {
+    if (e.button !== 0) return;
+    swipeRef.current = {
+      id: message.id,
+      startX: e.clientX,
+      startY: e.clientY,
+      dx: 0,
+      locked: null,
+      moved: false,
+    };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }
+
+  function onBubblePointerMove(e: ReactPointerEvent<HTMLDivElement>) {
+    const s = swipeRef.current;
+    if (!s || s.id !== e.currentTarget.dataset.msgid) return;
+    const dx = e.clientX - s.startX;
+    const dy = e.clientY - s.startY;
+    if (s.locked === null && (Math.abs(dx) > 8 || Math.abs(dy) > 8)) {
+      s.locked = Math.abs(dx) > Math.abs(dy);
+    }
+    if (s.locked !== true) return;
+    s.moved = true;
+    const next = Math.max(0, Math.min(SWIPE_MAX, dx));
+    s.dx = next;
+    setSwipeUi({ id: s.id, dx: next });
+  }
+
+  function onBubblePointerUp(
+    e: ReactPointerEvent<HTMLDivElement>,
+    message: ChatMessage
+  ) {
+    const s = swipeRef.current;
+    swipeRef.current = null;
+    setSwipeUi(null);
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      /* already released */
+    }
+    if (s?.moved && s.dx >= SWIPE_TRIGGER) {
+      beginReply(message);
+      return;
+    }
+    if (!s?.moved) {
+      setPeekId(peekId === message.id ? null : !mineOf(message) ? message.id : null);
+    }
+  }
+
+  function mineOf(message: ChatMessage) {
+    return message.senderId === user?.id;
+  }
+
+  function replyAuthorName(senderId: string) {
+    if (senderId === user?.id) return t.you;
+    return other?.displayName || "…";
+  }
 
   return (
     <div className="app-shell chat-shell">
@@ -322,7 +434,7 @@ export function ChatPage() {
         </div>
       </header>
 
-      <div className="message-stream">
+      <div className="message-stream" ref={streamRef}>
         {messages.length === 0 && !otherTyping && (
           <p className="empty-state center">{t.emptyChat}</p>
         )}
@@ -337,6 +449,8 @@ export function ChatPage() {
             m.originalText &&
             m.originalText !== m.text;
           const attachment = m.attachment;
+          const dx = swipeUi?.id === m.id ? swipeUi.dx : 0;
+          const quote = m.replyTo;
           return (
             <Fragment key={m.id}>
               {showDay && (
@@ -348,84 +462,145 @@ export function ChatPage() {
                 </div>
               )}
               <div
-                className={`bubble ${mine ? "mine" : "theirs"} ${
-                  attachment ? "has-media" : ""
-                }`}
-                onClick={() =>
-                  setPeekId(peekId === m.id ? null : !mine ? m.id : null)
-                }
+                className={`bubble-row ${mine ? "mine" : "theirs"}`}
+                data-msgid={m.id}
+                onPointerDown={(e) => onBubblePointerDown(e, m)}
+                onPointerMove={onBubblePointerMove}
+                onPointerUp={(e) => onBubblePointerUp(e, m)}
+                onPointerCancel={() => {
+                  swipeRef.current = null;
+                  setSwipeUi(null);
+                }}
               >
-                {attachment && isImageMime(attachment.mime) && (
-                  <button
-                    type="button"
-                    className="bubble-image-link"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setViewer(attachment);
-                    }}
-                  >
-                    <img
-                      className="bubble-image"
-                      src={mediaUrl(attachment.url)}
-                      alt={attachment.name}
-                      loading="lazy"
-                    />
-                  </button>
-                )}
-                {attachment && isVideoMime(attachment.mime) && (
-                  <button
-                    type="button"
-                    className="bubble-video-link"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setViewer(attachment);
-                    }}
-                  >
-                    <video
-                      className="bubble-video"
-                      src={mediaUrl(attachment.url)}
-                      muted
-                      playsInline
-                      preload="metadata"
-                    />
-                    <span className="bubble-video-play" aria-hidden="true" />
-                  </button>
-                )}
-                {attachment &&
-                  !isImageMime(attachment.mime) &&
-                  !isVideoMime(attachment.mime) && (
+                <span
+                  className={`bubble-reply-hint ${dx > 18 ? "show" : ""}`}
+                  aria-hidden="true"
+                >
+                  ↩
+                </span>
+                <div
+                  id={`msg-${m.id}`}
+                  className={`bubble ${mine ? "mine" : "theirs"} ${
+                    attachment ? "has-media" : ""
+                  } ${highlightId === m.id ? "bubble-flash" : ""}`}
+                  style={{ transform: dx ? `translateX(${dx}px)` : undefined }}
+                >
+                  {quote && (
                     <button
                       type="button"
-                      className="bubble-file"
+                      className="bubble-quote"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        scrollToQuoted(quote.id);
+                      }}
+                      onPointerDown={(e) => e.stopPropagation()}
+                    >
+                      <span className="bubble-quote-accent" aria-hidden="true" />
+                      <span className="bubble-quote-copy">
+                        <strong>{replyAuthorName(quote.senderId)}</strong>
+                        <span>
+                          {quote.text ||
+                            (quote.attachmentMime &&
+                            isImageMime(quote.attachmentMime)
+                              ? t.photo
+                              : quote.attachmentMime &&
+                                  isVideoMime(quote.attachmentMime)
+                                ? t.video
+                                : quote.attachmentName || t.file)}
+                        </span>
+                      </span>
+                    </button>
+                  )}
+                  {attachment && isImageMime(attachment.mime) && (
+                    <button
+                      type="button"
+                      className="bubble-image-link"
                       onClick={(e) => {
                         e.stopPropagation();
                         setViewer(attachment);
                       }}
+                      onPointerDown={(e) => e.stopPropagation()}
                     >
-                      <span className="bubble-file-icon" aria-hidden="true" />
-                      <span className="bubble-file-meta">
-                        <strong>{attachment.name}</strong>
-                        <small>
-                          {formatBytes(attachment.size)} · {t.openFile}
-                        </small>
-                      </span>
+                      <img
+                        className="bubble-image"
+                        src={mediaUrl(attachment.url)}
+                        alt={attachment.name}
+                        loading="lazy"
+                      />
                     </button>
                   )}
-                {!!m.text && <p>{m.text}</p>}
-                {m.translating && (
-                  <span className="translating">{t.translating}</span>
-                )}
-                {showOriginal && (
-                  <span className="original-peek">
-                    {t.original}: {m.originalText}
-                  </span>
-                )}
-                <span className="bubble-time">
-                  {formatMessageTime(m.createdAt, lang)}
-                </span>
-                {mine && m.id === lastSeenMineId && (
-                  <span className="bubble-seen">{t.seen}</span>
-                )}
+                  {attachment && isVideoMime(attachment.mime) && (
+                    <button
+                      type="button"
+                      className="bubble-video-link"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setViewer(attachment);
+                      }}
+                      onPointerDown={(e) => e.stopPropagation()}
+                    >
+                      <video
+                        className="bubble-video"
+                        src={mediaUrl(attachment.url)}
+                        muted
+                        playsInline
+                        preload="metadata"
+                      />
+                      <span className="bubble-video-play" aria-hidden="true" />
+                    </button>
+                  )}
+                  {attachment &&
+                    !isImageMime(attachment.mime) &&
+                    !isVideoMime(attachment.mime) && (
+                      <button
+                        type="button"
+                        className="bubble-file"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setViewer(attachment);
+                        }}
+                        onPointerDown={(e) => e.stopPropagation()}
+                      >
+                        <span className="bubble-file-icon" aria-hidden="true" />
+                        <span className="bubble-file-meta">
+                          <strong>{attachment.name}</strong>
+                          <small>
+                            {formatBytes(attachment.size)} · {t.openFile}
+                          </small>
+                        </span>
+                      </button>
+                    )}
+                  {!!m.text && <p>{m.text}</p>}
+                  {m.translating && (
+                    <span className="translating">{t.translating}</span>
+                  )}
+                  {showOriginal && (
+                    <span className="original-peek">
+                      {t.original}: {m.originalText}
+                    </span>
+                  )}
+                  <div className="bubble-meta">
+                    <button
+                      type="button"
+                      className="bubble-reply-btn"
+                      aria-label={t.reply}
+                      title={t.reply}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        beginReply(m);
+                      }}
+                      onPointerDown={(e) => e.stopPropagation()}
+                    >
+                      ↩
+                    </button>
+                    <span className="bubble-time">
+                      {formatMessageTime(m.createdAt, lang)}
+                    </span>
+                  </div>
+                  {mine && m.id === lastSeenMineId && (
+                    <span className="bubble-seen">{t.seen}</span>
+                  )}
+                </div>
               </div>
             </Fragment>
           );
@@ -433,6 +608,76 @@ export function ChatPage() {
         {otherTyping && <TypingCat label={t.typing} />}
         <div ref={bottomRef} />
       </div>
+
+      {replyTo && (
+        <div className="reply-dock">
+          <button
+            type="button"
+            className="reply-preview"
+            onClick={() => scrollToQuoted(replyTo.id)}
+          >
+            <span className="reply-preview-accent" aria-hidden="true" />
+            <span className="reply-preview-copy">
+              <strong>{replyAuthorName(replyTo.senderId)}</strong>
+              <span className="reply-preview-snippet">
+                {replyTo.attachment && isImageMime(replyTo.attachment.mime) ? (
+                  <>
+                    <svg
+                      className="reply-media-icon"
+                      viewBox="0 0 24 24"
+                      width="14"
+                      height="14"
+                      aria-hidden="true"
+                    >
+                      <path
+                        fill="currentColor"
+                        d="M20 5h-3.2l-1.2-1.6A2 2 0 0 0 14 2.8H10a2 2 0 0 0-1.6.6L7.2 5H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm-8 12.2A4.2 4.2 0 1 1 16.2 13 4.2 4.2 0 0 1 12 17.2z"
+                      />
+                    </svg>
+                    {t.photo}
+                  </>
+                ) : replyTo.attachment && isVideoMime(replyTo.attachment.mime) ? (
+                  <>
+                    <svg
+                      className="reply-media-icon"
+                      viewBox="0 0 24 24"
+                      width="14"
+                      height="14"
+                      aria-hidden="true"
+                    >
+                      <path
+                        fill="currentColor"
+                        d="M17 10.5V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3.5l4 3.5V7l-4 3.5z"
+                      />
+                    </svg>
+                    {t.video}
+                  </>
+                ) : (
+                  quoteLabel(replyTo, t.photo, t.video, t.file) ||
+                  t.messageUnavailable
+                )}
+              </span>
+            </span>
+            {replyTo.attachment &&
+              (isImageMime(replyTo.attachment.mime) ||
+                isVideoMime(replyTo.attachment.mime)) && (
+                <img
+                  className="reply-preview-thumb"
+                  src={mediaUrl(replyTo.attachment.url)}
+                  alt=""
+                />
+              )}
+          </button>
+          <button
+            type="button"
+            className="reply-preview-close"
+            aria-label={t.cancelReply}
+            onClick={() => setReplyTo(null)}
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       {(pending || attachError) && (
         <div className="attach-preview panel">

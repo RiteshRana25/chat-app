@@ -51,7 +51,8 @@ type SocketContextValue = {
   sendMessage: (
     conversationId: string,
     text: string,
-    attachment?: MessageAttachment | null
+    attachment?: MessageAttachment | null,
+    replyToId?: string | null
   ) => void;
   sendTyping: (conversationId: string, typing: boolean) => void;
   checkPresence: (userId: string) => void;
@@ -126,12 +127,14 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     (
       conversationId: string,
       text: string,
-      attachment?: MessageAttachment | null
+      attachment?: MessageAttachment | null,
+      replyToId?: string | null
     ) => {
       socketRef.current?.emit("send_message", {
         conversationId,
         text,
         attachment: attachment || null,
+        replyToId: replyToId || null,
       });
     },
     []

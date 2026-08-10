@@ -89,6 +89,8 @@ const en = {
   cancel: "Cancel",
   seen: "Seen",
   reply: "Reply",
+  cancelReply: "Cancel reply",
+  messageUnavailable: "Original message unavailable",
 };
 
 const zh: typeof en = {
@@ -178,6 +180,8 @@ const zh: typeof en = {
   cancel: "取消",
   seen: "已读",
   reply: "回复",
+  cancelReply: "取消回复",
+  messageUnavailable: "原消息不可用",
 };
 
 export type Dict = typeof en;
