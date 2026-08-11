@@ -208,11 +208,16 @@ export function BlossomScene({ density = 36, className = "" }: Props) {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext("2d", { alpha: true });
+    const ctx = canvas.getContext("2d", {
+      alpha: true,
+      desynchronized: true,
+    } as CanvasRenderingContext2DSettings);
     if (!ctx) return;
 
+    let running = true;
+
     const resize = () => {
-      const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+      const dpr = Math.min(window.devicePixelRatio || 1, 1.25);
       const w = window.innerWidth;
       const h = window.innerHeight;
       sizeRef.current = { w, h };
@@ -233,44 +238,57 @@ export function BlossomScene({ density = 36, className = "" }: Props) {
     window.addEventListener("resize", resize);
 
     const tick = (now: number) => {
-      rafRef.current = requestAnimationFrame(tick);
-      if (pausedRef.current) return;
-      if (now - lastFrameRef.current < FRAME_MS) return;
-      lastFrameRef.current = now;
-
-      const { w, h } = sizeRef.current;
-      ctx.clearRect(0, 0, w, h);
-      const currentMode = modeRef.current;
-
-      for (const p of particlesRef.current) {
-        if (p.kind !== currentMode) {
-          Object.assign(p, makeParticle(w, h, currentMode));
-          p.y = Math.random() * h;
-          p.x = Math.random() * w;
-        }
-
-        p.swing += p.swingSpeed;
-        p.x += p.speedX + Math.sin(p.swing) * (p.kind === "snow" ? 0.7 : 0.55);
-        p.y += p.speedY;
-        p.rot += p.rotSpeed;
-
-        if (p.kind === "snow") drawSnowflake(ctx, p);
-        else drawPetal(ctx, p);
-
-        if (p.y > h + 30 || p.x < -40 || p.x > w + 40) {
-          Object.assign(p, makeParticle(w, h, currentMode));
-          p.y = -10 - Math.random() * 40;
-          p.x = Math.random() * w;
-        }
+      if (!running) return;
+      if (pausedRef.current) {
+        // Fully stop the loop while typing / hidden — resume via watchdog.
+        rafRef.current = 0;
+        return;
       }
+      if (now - lastFrameRef.current >= FRAME_MS) {
+        lastFrameRef.current = now;
+        const { w, h } = sizeRef.current;
+        ctx.clearRect(0, 0, w, h);
+        const currentMode = modeRef.current;
 
-      ctx.globalAlpha = 1;
+        for (const p of particlesRef.current) {
+          if (p.kind !== currentMode) {
+            Object.assign(p, makeParticle(w, h, currentMode));
+            p.y = Math.random() * h;
+            p.x = Math.random() * w;
+          }
+
+          p.swing += p.swingSpeed;
+          p.x +=
+            p.speedX + Math.sin(p.swing) * (p.kind === "snow" ? 0.7 : 0.55);
+          p.y += p.speedY;
+          p.rot += p.rotSpeed;
+
+          if (p.kind === "snow") drawSnowflake(ctx, p);
+          else drawPetal(ctx, p);
+
+          if (p.y > h + 30 || p.x < -40 || p.x > w + 40) {
+            Object.assign(p, makeParticle(w, h, currentMode));
+            p.y = -10 - Math.random() * 40;
+            p.x = Math.random() * w;
+          }
+        }
+
+        ctx.globalAlpha = 1;
+      }
+      rafRef.current = requestAnimationFrame(tick);
     };
+
+    const resumeWatch = window.setInterval(() => {
+      if (!running || pausedRef.current || rafRef.current) return;
+      rafRef.current = requestAnimationFrame(tick);
+    }, 250);
 
     rafRef.current = requestAnimationFrame(tick);
 
     return () => {
+      running = false;
       cancelAnimationFrame(rafRef.current);
+      window.clearInterval(resumeWatch);
       window.removeEventListener("resize", resize);
     };
   }, [density]);
