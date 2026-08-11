@@ -49,20 +49,12 @@ const en = {
   appearanceHelp: "Light mode brings cherry blossoms. Dark mode brings snowfall.",
   lightMode: "Light",
   darkMode: "Dark",
-  pwaTitle: "Install app",
-  pwaHelp: "Add chat to your home screen so it opens like an app.",
-  pwaInstall: "Install app",
+  pwaTitle: "Download app",
+  pwaHelp: "Download the app to your phone or desktop and get notified for new messages.",
+  pwaInstall: "Download app",
   pwaInstalled: "App installed",
-  pwaInstallHint: "If the Install button is missing, follow the steps below.",
-  pwaInstallStepsTitle: "How to install on your phone",
-  pwaInstallStep1: "Open this website in your phone browser (Chrome, Safari, or Huawei Browser).",
-  pwaInstallStep2: "Tap the browser menu (⋮ or ≡).",
-  pwaInstallStep3: "Choose “Install app”, “Add to Home Screen”, or “Add to desktop”.",
-  pwaInstallStep4: "Open the new icon on your home screen — that is the app.",
-  pwaInstallHuawei:
-    "Huawei / HarmonyOS: open in Huawei Browser → menu → Add to home screen / Add to desktop. The one-tap Install button often does not appear.",
-  pwaCopyLink: "Copy website link",
-  pwaLinkCopied: "Link copied — open it in your phone browser",
+  pwaInstallHint:
+    "If the button does nothing (Bing / Huawei): open browser menu → Install app or Add to Home Screen / 添加到主屏幕.",
   pwaNotificationsTitle: "Notifications",
   pwaNotificationsHelp: "Get alerted when a new message arrives.",
   pwaEnableNotifications: "Enable notifications",
@@ -91,6 +83,7 @@ const en = {
   reply: "Reply",
   cancelReply: "Cancel reply",
   messageUnavailable: "Original message unavailable",
+  fileTooLarge: "File too large (max 100 MB)",
 };
 
 const zh: typeof en = {
@@ -141,20 +134,12 @@ const zh: typeof en = {
   appearanceHelp: "浅色模式樱花飘落，深色模式雪花纷飞。",
   lightMode: "浅色",
   darkMode: "深色",
-  pwaTitle: "安装到手机",
-  pwaHelp: "把聊天添加到主屏幕，像 App 一样打开。华为手机请看下面步骤。",
-  pwaInstall: "一键安装",
+  pwaTitle: "下载应用",
+  pwaHelp: "下载应用到手机或桌面，收到新消息时会通知你。",
+  pwaInstall: "下载应用",
   pwaInstalled: "已安装",
-  pwaInstallHint: "如果没有「一键安装」按钮，请按下面步骤操作（华为手机推荐）。",
-  pwaInstallStepsTitle: "手机安装步骤",
-  pwaInstallStep1: "用手机浏览器打开本网站（华为浏览器 / Chrome / Safari 都可以）。",
-  pwaInstallStep2: "点击浏览器右上角菜单「⋮」或「≡」。",
-  pwaInstallStep3: "选择「添加到主屏幕」「添加到桌面」或「安装应用」。",
-  pwaInstallStep4: "回到手机桌面，点击新图标即可像 App 一样使用。",
-  pwaInstallHuawei:
-    "华为 / 鸿蒙手机：请用「华为浏览器」打开本站 → 菜单 →「添加到桌面」。通常没有一键安装按钮，用此方法即可。",
-  pwaCopyLink: "复制网站链接",
-  pwaLinkCopied: "链接已复制 — 请用手机浏览器打开",
+  pwaInstallHint:
+    "如果按钮无效（必应 Bing / 华为浏览器）：打开浏览器菜单 →「安装应用」或「添加到主屏幕」。",
   pwaNotificationsTitle: "通知",
   pwaNotificationsHelp: "有新消息时收到提醒。",
   pwaEnableNotifications: "开启通知",
@@ -182,6 +167,7 @@ const zh: typeof en = {
   reply: "回复",
   cancelReply: "取消回复",
   messageUnavailable: "原消息不可用",
+  fileTooLarge: "文件过大（最大 100 MB）",
 };
 
 export type Dict = typeof en;

@@ -507,6 +507,11 @@ app.post("/api/conversations/:id/messages", authMiddleware, async (req, res) => 
 app.post("/api/upload", authMiddleware, (req, res) => {
   upload.single("file")(req, res, async (err: unknown) => {
     if (err) {
+      const code = (err as { code?: string }).code;
+      if (code === "LIMIT_FILE_SIZE") {
+        res.status(400).json({ error: "File too large (max 100 MB)" });
+        return;
+      }
       const message = err instanceof Error ? err.message : "Upload failed";
       res.status(400).json({ error: message });
       return;

@@ -1,4 +1,6 @@
-[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
+# Keep APK downloadable (do not SPA-fallback it)
+/FriendsForeverChat.apk  /FriendsForeverChat.apk  200
+/*.apk  /:splat.apk  200
+
+# SPA fallback for the React app
+/*    /index.html   200

@@ -1,6 +1,7 @@
 import {
   Fragment,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type FormEvent,
@@ -32,6 +33,7 @@ type PendingFile = {
 
 const SWIPE_TRIGGER = 56;
 const SWIPE_MAX = 72;
+const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
 
 function formatBytes(size: number): string {
   if (size < 1024) return `${size} B`;
@@ -61,7 +63,6 @@ export function ChatPage() {
   const { t, user, lang } = useAuth();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [other, setOther] = useState<User | null>(null);
-  const [text, setText] = useState("");
   const [pending, setPending] = useState<PendingFile | null>(null);
   const [uploading, setUploading] = useState(false);
   const [attachError, setAttachError] = useState("");
@@ -72,6 +73,7 @@ export function ChatPage() {
   const [peerLastReadAt, setPeerLastReadAt] = useState<string | null>(null);
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
   const [highlightId, setHighlightId] = useState<string | null>(null);
+  const [canSendDraft, setCanSendDraft] = useState(false);
   const [swipeUi, setSwipeUi] = useState<{ id: string; dx: number } | null>(
     null
   );
@@ -85,6 +87,7 @@ export function ChatPage() {
   );
   const isTypingRef = useRef(false);
   const focusedRef = useRef(false);
+  const pendingRef = useRef(false);
   const otherIdRef = useRef<string | null>(null);
   const sendTypingRef = useRef<(conversationId: string, typing: boolean) => void>(
     () => {}
@@ -99,6 +102,7 @@ export function ChatPage() {
   } | null>(null);
 
   otherIdRef.current = other?.id ?? null;
+  pendingRef.current = !!pending;
 
   useEffect(() => {
     if (!id) return;
@@ -119,16 +123,12 @@ export function ChatPage() {
     );
   }, [id]);
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, otherTyping]);
-
-  useEffect(() => {
-    const el = inputRef.current;
+  useLayoutEffect(() => {
+    const el = streamRef.current;
     if (!el) return;
-    el.style.height = "0px";
-    el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
-  }, [text]);
+    // Stay pinned to the latest messages (no smooth scroll jump).
+    el.scrollTop = el.scrollHeight;
+  }, [id, messages.length, otherTyping]);
 
   useEffect(() => {
     return () => {
@@ -214,7 +214,14 @@ export function ChatPage() {
       window.removeEventListener("focus", mark);
       document.removeEventListener("visibilitychange", mark);
     };
-  }, [id, connected, user?.id, markRead, messages.length]);
+  }, [id, connected, user?.id, markRead]);
+
+  // Mark read when new incoming messages arrive while chat is open (without tying to every render).
+  useEffect(() => {
+    if (!id || !connected || !user) return;
+    if (document.visibilityState !== "visible") return;
+    markRead(id);
+  }, [messages.length, id, connected, user?.id, markRead]);
 
   sendTypingRef.current = sendTyping;
 
@@ -223,7 +230,9 @@ export function ChatPage() {
       if (prev?.previewUrl) URL.revokeObjectURL(prev.previewUrl);
       return null;
     });
+    pendingRef.current = false;
     if (fileInputRef.current) fileInputRef.current.value = "";
+    setCanSendDraft(readDraft().trim().length > 0);
   }
 
   function clearHeartbeat() {
@@ -247,9 +256,10 @@ export function ChatPage() {
       sendTyping(id, true);
     }
     clearHeartbeat();
+    // Keepalive only — avoid socket spam on every keystroke.
     heartbeatRef.current = setInterval(() => {
       if (id && isTypingRef.current) sendTyping(id, true);
-    }, 2000);
+    }, 4000);
   }
 
   function syncTyping(nextText: string, focused: boolean) {
@@ -257,10 +267,39 @@ export function ChatPage() {
     else stopTyping();
   }
 
+  function resizeComposer() {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "0px";
+    el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+  }
+
+  function readDraft(): string {
+    return inputRef.current?.value ?? "";
+  }
+
+  function clearDraft() {
+    if (inputRef.current) {
+      inputRef.current.value = "";
+      inputRef.current.style.height = "";
+    }
+    setCanSendDraft(false);
+  }
+
+  function updateSendEnabled(draft: string) {
+    const next = draft.trim().length > 0 || pendingRef.current;
+    setCanSendDraft((prev) => (prev === next ? prev : next));
+  }
+
   function onPickFile(fileList: FileList | null) {
     const file = fileList?.[0];
     if (!file) return;
     setAttachError("");
+    if (file.size > MAX_UPLOAD_BYTES) {
+      setAttachError(t.fileTooLarge);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
     setPending((prev) => {
       if (prev?.previewUrl) URL.revokeObjectURL(prev.previewUrl);
       return {
@@ -268,6 +307,7 @@ export function ChatPage() {
         previewUrl: isImageMime(file.type) ? URL.createObjectURL(file) : "",
       };
     });
+    setCanSendDraft(true);
   }
 
   async function sendCurrent(caption: string) {
@@ -291,14 +331,14 @@ export function ChatPage() {
     }
 
     sendMessage(id, caption, attachment, replyTo?.id ?? null);
-    setText("");
+    clearDraft();
     setReplyTo(null);
     clearPending();
   }
 
   function onSend(e: FormEvent) {
     e.preventDefault();
-    void sendCurrent(text.trim());
+    void sendCurrent(readDraft().trim());
   }
 
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
@@ -307,10 +347,10 @@ export function ChatPage() {
     const isCoarse = window.matchMedia("(pointer: coarse)").matches;
     if (isCoarse) return;
     e.preventDefault();
-    void sendCurrent(text.trim());
+    void sendCurrent(readDraft().trim());
   }
 
-  const canSend = (!!text.trim() || !!pending) && !uploading;
+  const canSend = canSendDraft && !uploading;
 
   const lastSeenMineId = (() => {
     if (!peerLastReadAt || !user) return null;
@@ -729,15 +769,16 @@ export function ChatPage() {
         </button>
         <textarea
           ref={inputRef}
-          value={text}
-          onChange={(e) => {
-            const next = e.target.value;
-            setText(next);
+          defaultValue=""
+          onInput={(e) => {
+            const next = e.currentTarget.value;
+            resizeComposer();
             syncTyping(next, focusedRef.current);
+            updateSendEnabled(next);
           }}
           onFocus={() => {
             focusedRef.current = true;
-            syncTyping(text, true);
+            syncTyping(readDraft(), true);
           }}
           onBlur={() => {
             focusedRef.current = false;

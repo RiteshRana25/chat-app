@@ -22,7 +22,6 @@ export function SettingsPage() {
   const [pushOn, setPushOn] = useState(false);
   const [notifBusy, setNotifBusy] = useState(false);
   const [notifError, setNotifError] = useState<string | null>(null);
-  const [linkCopied, setLinkCopied] = useState(false);
 
   useEffect(() => {
     const onInstall = () => setInstallReady(canInstallApp());
@@ -70,25 +69,9 @@ export function SettingsPage() {
     setSaved(true);
   }
 
-  async function installApp() {
+  async function downloadApp() {
     const ok = await promptInstallApp();
     if (ok) setInstalled(true);
-  }
-
-  async function copySiteLink() {
-    const url = window.location.origin + "/";
-    try {
-      await navigator.clipboard.writeText(url);
-    } catch {
-      const input = document.createElement("input");
-      input.value = url;
-      document.body.appendChild(input);
-      input.select();
-      document.execCommand("copy");
-      input.remove();
-    }
-    setLinkCopied(true);
-    window.setTimeout(() => setLinkCopied(false), 2500);
   }
 
   async function toggleNotifications() {
@@ -192,33 +175,9 @@ export function SettingsPage() {
 
         <div className="pwa-actions">
           {!installed && (
-            <>
-              {installReady ? (
-                <button type="button" className="btn-primary" onClick={installApp}>
-                  {t.pwaInstall}
-                </button>
-              ) : (
-                <p className="hint">{t.pwaInstallHint}</p>
-              )}
-
-              <div className="pwa-install-guide">
-                <h3>{t.pwaInstallStepsTitle}</h3>
-                <ol>
-                  <li>{t.pwaInstallStep1}</li>
-                  <li>{t.pwaInstallStep2}</li>
-                  <li>{t.pwaInstallStep3}</li>
-                  <li>{t.pwaInstallStep4}</li>
-                </ol>
-                <p className="pwa-huawei-note">{t.pwaInstallHuawei}</p>
-                <button
-                  type="button"
-                  className="ghost-btn"
-                  onClick={copySiteLink}
-                >
-                  {linkCopied ? t.pwaLinkCopied : t.pwaCopyLink}
-                </button>
-              </div>
-            </>
+            <button type="button" className="btn-primary" onClick={downloadApp}>
+              {t.pwaInstall}
+            </button>
           )}
 
           {pushOn ? (
