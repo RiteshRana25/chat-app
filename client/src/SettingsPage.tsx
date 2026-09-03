@@ -3,39 +3,26 @@ import { Link } from "react-router-dom";
 import { useAuth, type Theme } from "./AuthContext";
 import type { Lang } from "./i18n";
 import {
-  canInstallApp,
   disablePushNotifications,
   enablePushNotifications,
   isPushSubscribed,
-  isStandaloneApp,
   notificationPermission,
-  promptInstallApp,
 } from "./pwa";
+
+const APK_PATH =
+  (import.meta.env.VITE_APK_URL as string | undefined)?.trim() ||
+  "/FriendsForeverChat.apk";
 
 export function SettingsPage() {
   const { t, lang, setLanguage, theme, setTheme } = useAuth();
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [installReady, setInstallReady] = useState(canInstallApp());
-  const [installed, setInstalled] = useState(isStandaloneApp());
   const [permission, setPermission] = useState(notificationPermission());
   const [pushOn, setPushOn] = useState(false);
   const [notifBusy, setNotifBusy] = useState(false);
   const [notifError, setNotifError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const onInstall = () => setInstallReady(canInstallApp());
-    const onInstalled = () => {
-      setInstalled(true);
-      setInstallReady(false);
-    };
-    window.addEventListener("ffc-install-available", onInstall);
-    window.addEventListener("ffc-installed", onInstalled);
-    return () => {
-      window.removeEventListener("ffc-install-available", onInstall);
-      window.removeEventListener("ffc-installed", onInstalled);
-    };
-  }, []);
+  const [apkError, setApkError] = useState<string | null>(null);
+  const [apkBusy, setApkBusy] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -69,9 +56,46 @@ export function SettingsPage() {
     setSaved(true);
   }
 
-  async function downloadApp() {
-    const ok = await promptInstallApp();
-    if (ok) setInstalled(true);
+  async function downloadApk() {
+    setApkError(null);
+    setApkBusy(true);
+    try {
+      let available = false;
+      try {
+        const head = await fetch(APK_PATH, { method: "HEAD" });
+        const type = head.headers.get("content-type") || "";
+        available =
+          head.ok &&
+          !type.includes("text/html") &&
+          Number(head.headers.get("content-length") || "1") > 1000;
+      } catch {
+        available = false;
+      }
+      if (!available) {
+        const probe = await fetch(APK_PATH, {
+          method: "GET",
+          headers: { Range: "bytes=0-3" },
+        });
+        const type = probe.headers.get("content-type") || "";
+        available =
+          (probe.ok || probe.status === 206) && !type.includes("text/html");
+      }
+      if (!available) {
+        setApkError(t.pwaDownloadMissing);
+        return;
+      }
+      const a = document.createElement("a");
+      a.href = APK_PATH;
+      a.download = "FriendsForeverChat.apk";
+      a.rel = "noopener";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch {
+      setApkError(t.pwaDownloadMissing);
+    } finally {
+      setApkBusy(false);
+    }
   }
 
   async function toggleNotifications() {
@@ -168,18 +192,38 @@ export function SettingsPage() {
       </section>
 
       <section className="settings-card">
-        <h2>{installed ? t.pwaNotificationsTitle : t.pwaTitle}</h2>
-        <p className="hint">
-          {installed ? t.pwaNotificationsHelp : t.pwaHelp}
-        </p>
+        <h2>{t.pwaTitle}</h2>
+        <p className="hint">{t.pwaHelp}</p>
 
         <div className="pwa-actions">
-          {!installed && (
-            <button type="button" className="btn-primary" onClick={downloadApp}>
-              {t.pwaInstall}
-            </button>
-          )}
+          <button
+            type="button"
+            className="btn-primary"
+            disabled={apkBusy}
+            onClick={downloadApk}
+          >
+            {apkBusy ? "…" : t.pwaInstall}
+          </button>
+          {apkError && <p className="hint">{apkError}</p>}
 
+          <div className="pwa-install-guide">
+            <h3>{t.pwaInstallStepsTitle}</h3>
+            <ol>
+              <li>{t.pwaInstallStep1}</li>
+              <li>{t.pwaInstallStep2}</li>
+              <li>{t.pwaInstallStep3}</li>
+              <li>{t.pwaInstallStep4}</li>
+            </ol>
+            <p className="pwa-huawei-note">{t.pwaInstallHuawei}</p>
+          </div>
+        </div>
+      </section>
+
+      <section className="settings-card">
+        <h2>{t.pwaNotificationsTitle}</h2>
+        <p className="hint">{t.pwaNotificationsHelp}</p>
+
+        <div className="pwa-actions">
           {pushOn ? (
             <button
               type="button"
